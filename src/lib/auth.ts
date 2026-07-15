@@ -109,41 +109,30 @@ export async function getAuthenticatedState(): Promise<AuthState> {
   }
 }
 
+export function resolveRouteForAuthState(profile: Profile | null, rosterEntry: RosterEntry | null): string {
+  if (!profile) {
+    return '/link-roblox';
+  }
+
+  if (!profile.roblox_username) {
+    return '/link-roblox';
+  }
+
+  if (!rosterEntry) {
+    return '/enlist/apply';
+  }
+
+  return '/';
+}
+
 export async function resolvePostAuthPath(): Promise<string> {
   try {
     const { profile, rosterEntry } = await getAuthenticatedState();
-
-    if (!profile) {
-      return '/link-roblox';
-    }
-
-    if (!profile.roblox_username) {
-      return '/link-roblox';
-    }
-
-    if (!rosterEntry) {
-      return '/enlist/apply';
-    }
-
-    return '/';
+    return resolveRouteForAuthState(profile, rosterEntry);
   } catch (error) {
     console.error('Post-auth redirect failed', error);
     return '/link-roblox';
   }
-}
-
-let postAuthResolutionPromise: Promise<string> | null = null;
-
-export function getPostAuthResolution(): Promise<string> {
-  if (!postAuthResolutionPromise) {
-    postAuthResolutionPromise = resolvePostAuthPath();
-  }
-
-  return postAuthResolutionPromise;
-}
-
-export function resetPostAuthResolution() {
-  postAuthResolutionPromise = null;
 }
 
 export async function verifyMinimumGroupRank(profile: Profile | null): Promise<{ verified: boolean; checked: boolean; message: string }> {

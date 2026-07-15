@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -15,45 +15,8 @@ export default function LinkRobloxPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [hasSession, setHasSession] = useState(false);
-  const authCheckHandledRef = useRef(false);
-
-  useEffect(() => {
-    let active = true;
-
-    const initialize = async () => {
-      if (authCheckHandledRef.current) {
-        return;
-      }
-
-      authCheckHandledRef.current = true;
-
-      const { session } = await getAuthenticatedState();
-      if (!active) {
-        return;
-      }
-
-      if (!session?.user) {
-        navigate('/login', { replace: true });
-        return;
-      }
-
-      setHasSession(true);
-    };
-
-    void initialize();
-
-    return () => {
-      active = false;
-    };
-  }, [navigate]);
 
   const handleGenerate = async () => {
-    if (!hasSession) {
-      navigate('/login', { replace: true });
-      return;
-    }
-
     setError(null);
     setSuccess(null);
     setLoading(true);
@@ -102,11 +65,6 @@ export default function LinkRobloxPage() {
   };
 
   const handleConfirm = async () => {
-    if (!hasSession) {
-      navigate('/login', { replace: true });
-      return;
-    }
-
     setError(null);
     setSuccess(null);
     setLoading(true);

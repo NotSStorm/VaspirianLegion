@@ -1,4 +1,5 @@
-import { Route, Routes } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import HomePage from './pages/HomePage';
 import LorePage from './pages/LorePage';
@@ -12,10 +13,54 @@ import LoginPage from './pages/LoginPage';
 import LinkRobloxPage from './pages/LinkRobloxPage';
 import ApplyPage from './pages/ApplyPage';
 import AdminPage from './pages/AdminPage';
+import { getAuthenticatedState, resolveRouteForAuthState } from './lib/auth';
+import { supabase } from './lib/supabase';
+
+function AuthRouteGate() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    let active = true;
+
+    const handleRoute = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!active) {
+        return;
+      }
+
+      if (!session?.user) {
+        if (location.pathname !== '/login') {
+          navigate('/login', { replace: true });
+        }
+        return;
+      }
+
+      const { profile, rosterEntry } = await getAuthenticatedState();
+      if (!active) {
+        return;
+      }
+
+      const nextPath = resolveRouteForAuthState(profile, rosterEntry);
+      if (location.pathname !== nextPath) {
+        navigate(nextPath, { replace: true });
+      }
+    };
+
+    void handleRoute();
+
+    return () => {
+      active = false;
+    };
+  }, [location.pathname, navigate]);
+
+  return null;
+}
 
 function App() {
   return (
     <Layout>
+      <AuthRouteGate />
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/lore" element={<LorePage />} />
