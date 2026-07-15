@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, ShieldCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { resolvePostAuthPath } from '../lib/auth';
+import { getPostAuthResolution } from '../lib/auth';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState('Preparing sign-in...');
   const [error, setError] = useState<string | null>(null);
+  const redirectHandledRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
@@ -18,17 +19,25 @@ export default function LoginPage() {
         return;
       }
 
-      if (session?.user) {
-        try {
-          const nextPath = await resolvePostAuthPath();
-          navigate(nextPath, { replace: true });
-        } catch (err) {
-          setError(err instanceof Error ? err.message : 'Unable to determine your next destination.');
-        }
+      if (!session?.user) {
+        setStatus('Connect your Discord account to continue.');
         return;
       }
 
-      setStatus('Connect your Discord account to continue.');
+      if (redirectHandledRef.current) {
+        return;
+      }
+
+      redirectHandledRef.current = true;
+      setStatus('Signing you in...');
+
+      try {
+        const nextPath = await getPostAuthResolution();
+        navigate(nextPath, { replace: true });
+      } catch (err) {
+        redirectHandledRef.current = false;
+        setError(err instanceof Error ? err.message : 'Unable to determine your next destination.');
+      }
     };
 
     void initialize();

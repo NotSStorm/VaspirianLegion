@@ -132,6 +132,20 @@ export async function resolvePostAuthPath(): Promise<string> {
   }
 }
 
+let postAuthResolutionPromise: Promise<string> | null = null;
+
+export function getPostAuthResolution(): Promise<string> {
+  if (!postAuthResolutionPromise) {
+    postAuthResolutionPromise = resolvePostAuthPath();
+  }
+
+  return postAuthResolutionPromise;
+}
+
+export function resetPostAuthResolution() {
+  postAuthResolutionPromise = null;
+}
+
 export async function verifyMinimumGroupRank(profile: Profile | null): Promise<{ verified: boolean; checked: boolean; message: string }> {
   if (!profile?.roblox_username) {
     return { verified: false, checked: false, message: 'Pending verification' };
