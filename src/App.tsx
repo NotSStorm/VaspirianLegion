@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import Layout from './components/Layout';
 import HomePage from './pages/HomePage';
 import LorePage from './pages/LorePage';
@@ -13,67 +13,110 @@ import LoginPage from './pages/LoginPage';
 import LinkRobloxPage from './pages/LinkRobloxPage';
 import ApplyPage from './pages/ApplyPage';
 import AdminPage from './pages/AdminPage';
-import { getAuthenticatedState, resolveRouteForAuthState } from './lib/auth';
+import { getAuthenticatedState } from './lib/auth';
 import { supabase } from './lib/supabase';
 
-function AuthRouteGate() {
+type RouteAccessState = {
+  loading: boolean;
+  hasSession: boolean;
+  role: 'member' | 'officer' | 'admin' | null;
+  robloxUsername: string | null;
+};
+
+function ProtectedRoute({ children, requireRoblox = false, requireAdmin = false }: { children: ReactNode; requireRoblox?: boolean; requireAdmin?: boolean }) {
   const location = useLocation();
-  const navigate = useNavigate();
+  const [accessState, setAccessState] = useState<RouteAccessState>({
+    loading: true,
+    hasSession: false,
+    role: null,
+    robloxUsername: null
+  });
 
   useEffect(() => {
     let active = true;
 
-    const handleRoute = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+    const resolveAccessState = async () => {
+      const { session, profile } = await getAuthenticatedState();
       if (!active) {
         return;
       }
 
-      if (!session?.user) {
-        if (location.pathname !== '/login') {
-          navigate('/login', { replace: true });
-        }
-        return;
-      }
-
-      const { profile, rosterEntry } = await getAuthenticatedState();
-      if (!active) {
-        return;
-      }
-
-      const nextPath = resolveRouteForAuthState(profile, rosterEntry);
-      if (location.pathname !== nextPath) {
-        navigate(nextPath, { replace: true });
-      }
+      setAccessState({
+        loading: false,
+        hasSession: Boolean(session?.user),
+        role: profile?.role ?? null,
+        robloxUsername: profile?.roblox_username?.trim() || null
+      });
     };
 
-    void handleRoute();
+    void resolveAccessState();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
+      void resolveAccessState();
+    });
 
     return () => {
       active = false;
+      subscription.unsubscribe();
     };
-  }, [location.pathname, navigate]);
+  }, []);
 
-  return null;
+  if (accessState.loading) {
+    return null;
+  }
+
+  if (!accessState.hasSession) {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
+  if (requireRoblox && location.pathname !== '/link-roblox' && !accessState.robloxUsername) {
+    return <Navigate to="/link-roblox" replace />;
+  }
+
+  if (requireAdmin && accessState.role !== 'admin') {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
 }
 
 function App() {
   return (
     <Layout>
-      <AuthRouteGate />
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/lore" element={<LorePage />} />
         <Route path="/enlist" element={<EnlistPage />} />
-        <Route path="/enlist/apply" element={<ApplyPage />} />
+        <Route
+          path="/enlist/apply"
+          element={(
+            <ProtectedRoute requireRoblox>
+              <ApplyPage />
+            </ProtectedRoute>
+          )}
+        />
         <Route path="/personnel" element={<PersonnelPage />} />
         <Route path="/command" element={<CommandPage />} />
         <Route path="/battles" element={<BattlesPage />} />
         <Route path="/schedule" element={<SchedulePage />} />
         <Route path="/medals" element={<MedalsPage />} />
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/link-roblox" element={<LinkRobloxPage />} />
-        <Route path="/admin" element={<AdminPage />} />
+        <Route
+          path="/link-roblox"
+          element={(
+            <ProtectedRoute>
+              <LinkRobloxPage />
+            </ProtectedRoute>
+          )}
+        />
+        <Route
+          path="/admin"
+          element={(
+            <ProtectedRoute requireRoblox requireAdmin>
+              <AdminPage />
+            </ProtectedRoute>
+          )}
+        />
       </Routes>
     </Layout>
   );
