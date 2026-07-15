@@ -4,13 +4,14 @@ import { supabase } from '../lib/supabase';
 import { verifyMinimumGroupRank } from '../lib/auth';
 import type { Profile } from '../types';
 
+const TIMEZONE_PATTERN = /^(UTC|GMT|EST|EDT|CST|CDT|MST|MDT|PST|PDT|[A-Z]{2,4}|[A-Za-z]+(?:\/[A-Za-z_]+)*)$/;
+
 function normalizeDiscordName(raw?: string | null) {
   const value = raw?.trim() ?? '';
   return value.startsWith('@') ? value : `@${value}`;
 }
 
 export default function ApplyPage() {
-  const [serviceNumber, setServiceNumber] = useState('PVT-');
   const [timezone, setTimezone] = useState('');
   const [profile, setProfile] = useState<Profile | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -88,12 +89,9 @@ export default function ApplyPage() {
     }
 
     const nextErrors: Record<string, string> = {};
-    const serviceMatch = serviceNumber.trim().match(/\d{4}$/);
-    if (!serviceMatch) {
-      nextErrors.serviceNumber = 'Enter a service number ending in 4 digits.';
-    }
-    if (!timezone.trim()) {
-      nextErrors.timezone = 'Select or enter a timezone.';
+    const normalizedTimezone = timezone.trim().toUpperCase();
+    if (!normalizedTimezone || !TIMEZONE_PATTERN.test(normalizedTimezone)) {
+      nextErrors.timezone = 'Enter a valid timezone such as EST, CST, MST, PST, or GMT.';
     }
     if (!resolvedProfile?.id) {
       nextErrors.profile = 'You must sign in before submitting.';
@@ -108,9 +106,8 @@ export default function ApplyPage() {
     try {
       const { error } = await supabase.from('applications').insert({
         profile_id: resolvedProfile!.id,
-        service_number: serviceNumber.trim(),
         callsign: callsign,
-        timezone: timezone.trim(),
+        timezone: normalizedTimezone,
         requested_group_join: true,
         status: 'pending'
       }).select('*').single();
@@ -122,8 +119,16 @@ export default function ApplyPage() {
       setSubmitted(true);
       setMessage('Application submitted — pending HR review.');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to submit your application.';
-      setErrors({ submit: message });
+      console.error('Application submission failed', error);
+      const message = error instanceof Error
+        ? error.message
+        : 'Unable to submit your application.';
+      const friendlyMessage = /network|fetch|timeout/i.test(message)
+        ? 'The request failed because of a network issue. Please try again.'
+        : /not authenticated|jwt|session/i.test(message)
+          ? 'You need to be signed in before submitting an application.'
+          : message;
+      setErrors({ submit: friendlyMessage });
     } finally {
       setSubmitting(false);
     }
@@ -148,13 +153,8 @@ export default function ApplyPage() {
           </div>
         ) : (
           <form className="mt-6 grid gap-4" onSubmit={handleSubmit}>
-            <label htmlFor="service-number">
-              <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Service Number</div>
-              <input id="service-number" value={serviceNumber} onChange={(e) => setServiceNumber(e.target.value)} className="mt-2 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-silver" />
-              {errors.serviceNumber && <p className="mt-2 text-sm text-red-400">{errors.serviceNumber}</p>}
-            </label>
             <div className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-3 text-sm text-slate-300">
-              <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Callsign</div>
+              <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Roblox Username</div>
               <div className="mt-2 font-semibold text-silver">{callsign}</div>
             </div>
             <label htmlFor="timezone">

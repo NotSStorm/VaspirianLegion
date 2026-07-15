@@ -67,7 +67,6 @@ export interface SiteSetting {
 export interface Application {
   id: string;
   profile_id: string;
-  service_number: string;
   callsign: string;
   timezone: string;
   requested_group_join: boolean;

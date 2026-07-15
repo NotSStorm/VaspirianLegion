@@ -8,24 +8,51 @@ export interface AuthState {
   rosterEntry: RosterEntry | null;
 }
 
-async function getExistingProfile(userId: string): Promise<Profile | null> {
-  const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+function getProfileDisplayName(session: Session | null) {
+  return session?.user.user_metadata?.user_name
+    ?? session?.user.user_metadata?.preferred_username
+    ?? session?.user.user_metadata?.global_name
+    ?? session?.user.user_metadata?.name
+    ?? session?.user.email
+    ?? 'discord-user';
+}
 
-  if (error && !/does not exist|relation/i.test(error.message)) {
+async function getExistingProfile(userId: string): Promise<Profile | null> {
+  try {
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+
+    if (error) {
+      if (/does not exist|relation/i.test(error.message)) {
+        return null;
+      }
+      console.error('Profile lookup failed', error);
+      throw error;
+    }
+
+    return data as Profile | null;
+  } catch (error) {
+    console.error('Profile lookup crashed', error);
     throw error;
   }
-
-  return data as Profile | null;
 }
 
 async function getExistingRosterEntry(userId: string): Promise<RosterEntry | null> {
-  const { data, error } = await supabase.from('roster').select('*').eq('profile_id', userId).maybeSingle();
+  try {
+    const { data, error } = await supabase.from('roster').select('*').eq('profile_id', userId).maybeSingle();
 
-  if (error && !/does not exist|relation/i.test(error.message)) {
+    if (error) {
+      if (/does not exist|relation/i.test(error.message)) {
+        return null;
+      }
+      console.error('Roster lookup failed', error);
+      throw error;
+    }
+
+    return data as RosterEntry | null;
+  } catch (error) {
+    console.error('Roster lookup crashed', error);
     throw error;
   }
-
-  return data as RosterEntry | null;
 }
 
 export async function ensureProfileForSession(session: Session | null): Promise<Profile | null> {
@@ -38,7 +65,7 @@ export async function ensureProfileForSession(session: Session | null): Promise<
   const profilePayload = {
     id: user.id,
     discord_id: user.user_metadata?.provider_id ?? user.id,
-    discord_username: user.user_metadata?.user_name ?? user.user_metadata?.preferred_username ?? user.user_metadata?.global_name ?? user.user_metadata?.name ?? user.email ?? 'discord-user',
+    discord_username: getProfileDisplayName(session),
     role: existingProfile?.role ?? 'member',
     roblox_username: existingProfile?.roblox_username ?? null,
     callsign: existingProfile?.callsign ?? null,
@@ -58,36 +85,51 @@ export async function ensureProfileForSession(session: Session | null): Promise<
 }
 
 export async function getAuthenticatedState(): Promise<AuthState> {
-  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  try {
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
-  if (sessionError || !session?.user) {
+    if (sessionError) {
+      console.error('Session lookup failed', sessionError);
+      return { session: null, profile: null, rosterEntry: null };
+    }
+
+    if (!session?.user) {
+      return { session: null, profile: null, rosterEntry: null };
+    }
+
+    const [profile, rosterEntry] = await Promise.all([
+      ensureProfileForSession(session),
+      getExistingRosterEntry(session.user.id)
+    ]);
+
+    return { session, profile, rosterEntry };
+  } catch (error) {
+    console.error('Authenticated-state resolution failed', error);
     return { session: null, profile: null, rosterEntry: null };
   }
-
-  const [profile, rosterEntry] = await Promise.all([
-    ensureProfileForSession(session),
-    getExistingRosterEntry(session.user.id)
-  ]);
-
-  return { session, profile, rosterEntry };
 }
 
 export async function resolvePostAuthPath(): Promise<string> {
-  const { profile, rosterEntry } = await getAuthenticatedState();
+  try {
+    const { profile, rosterEntry } = await getAuthenticatedState();
 
-  if (!profile) {
-    return '/login';
-  }
+    if (!profile) {
+      return '/link-roblox';
+    }
 
-  if (!profile.roblox_username) {
+    if (!profile.roblox_username) {
+      return '/link-roblox';
+    }
+
+    if (!rosterEntry) {
+      return '/enlist/apply';
+    }
+
+    return '/';
+  } catch (error) {
+    console.error('Post-auth redirect failed', error);
     return '/link-roblox';
   }
-
-  if (!rosterEntry) {
-    return '/enlist/apply';
-  }
-
-  return '/';
 }
 
 export async function verifyMinimumGroupRank(profile: Profile | null): Promise<{ verified: boolean; checked: boolean; message: string }> {

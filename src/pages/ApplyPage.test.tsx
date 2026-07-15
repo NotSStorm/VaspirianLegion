@@ -47,7 +47,6 @@ describe('ApplyPage', () => {
   it('submits a new application with the authenticated profile and shows a confirmation', async () => {
     render(<ApplyPage />);
 
-    fireEvent.change(screen.getByLabelText(/service number/i), { target: { value: 'PVT-1234' } });
     fireEvent.change(screen.getByLabelText(/timezone/i), { target: { value: 'CST' } });
     fireEvent.click(screen.getByRole('button', { name: /submit application/i }));
 
