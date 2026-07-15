@@ -100,32 +100,32 @@ alter table site_settings enable row level security;
 alter table applications enable row level security;
 alter table roster enable row level security;
 
-create policy if not exists profiles_select_public on profiles
+create policy profiles_select_public on profiles
   for select using (true);
 
-create policy if not exists profiles_manage_admin on profiles
+create policy profiles_manage_admin on profiles
   for all using (auth.role() = 'authenticated');
 
-create policy if not exists roster_qualifications_select_public on roster_qualifications
+create policy roster_qualifications_select_public on roster_qualifications
   for select using (true);
 
-create policy if not exists battles_select_public on battles
+create policy battles_select_public on battles
   for select using (true);
 
-create policy if not exists medals_select_public on medals
+create policy medals_select_public on medals
   for select using (true);
 
-create policy if not exists lore_timeline_select_public on lore_timeline
+create policy lore_timeline_select_public on lore_timeline
   for select using (true);
 
-create policy if not exists command_slots_select_public on command_slots
+create policy command_slots_select_public on command_slots
   for select using (true);
 
-create policy if not exists site_settings_select_public on site_settings
+create policy site_settings_select_public on site_settings
   for select using (true);
 
-create policy if not exists applications_select_owner on applications
+create policy applications_select_owner on applications
   for select using (auth.uid() = profile_id);
 
-create policy if not exists roster_select_public on roster
+create policy roster_select_public on roster
   for select using (true);
