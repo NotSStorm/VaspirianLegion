@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -11,26 +11,42 @@ function randomCode() {
 export default function LinkRobloxPage() {
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
-  const [code, setCode] = useState<string | null>(null);
+  const [verificationCode, setVerificationCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [hasSession, setHasSession] = useState(false);
+  const authCheckHandledRef = useRef(false);
 
   useEffect(() => {
+    let active = true;
+
     const initialize = async () => {
+      if (authCheckHandledRef.current) {
+        return;
+      }
+
+      authCheckHandledRef.current = true;
+
       const { session } = await getAuthenticatedState();
+      if (!active) {
+        return;
+      }
+
       if (!session?.user) {
         navigate('/login', { replace: true });
         return;
       }
+
       setHasSession(true);
     };
 
     void initialize();
-  }, [navigate]);
 
-  const generatedCode = useMemo(() => code ?? randomCode(), [code]);
+    return () => {
+      active = false;
+    };
+  }, [navigate]);
 
   const handleGenerate = async () => {
     if (!hasSession) {
@@ -76,7 +92,7 @@ export default function LinkRobloxPage() {
         throw profileError;
       }
 
-      setCode(nextCode);
+      setVerificationCode(nextCode);
       setSuccess('A fresh verification code has been saved to your profile.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to generate a verification code.');
@@ -103,8 +119,8 @@ export default function LinkRobloxPage() {
       }
 
       const trimmedUsername = username.trim();
-      const verificationCode = profile?.roblox_verification_code || code;
-      if (!trimmedUsername || !verificationCode) {
+      const resolvedVerificationCode = profile?.roblox_verification_code || verificationCode;
+      if (!trimmedUsername || !resolvedVerificationCode) {
         setError('Generate a code first and confirm your Roblox username.');
         return;
       }
@@ -112,7 +128,7 @@ export default function LinkRobloxPage() {
       const response = await fetch('/api/roblox/verify-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: trimmedUsername, code: verificationCode })
+        body: JSON.stringify({ username: trimmedUsername, code: resolvedVerificationCode })
       });
 
       const payload = await response.json().catch(() => ({}));
@@ -124,7 +140,7 @@ export default function LinkRobloxPage() {
         roblox_id: payload.robloxId,
         roblox_username: trimmedUsername,
         roblox_verified_at: new Date().toISOString(),
-        roblox_verification_code: verificationCode
+        roblox_verification_code: resolvedVerificationCode
       }).eq('id', session.user.id);
 
       if (profileError) {
@@ -141,14 +157,14 @@ export default function LinkRobloxPage() {
   };
 
   const handleUseDifferentAccount = () => {
-    setCode(null);
+    setVerificationCode(null);
     setError(null);
     setSuccess(null);
     setUsername('');
   };
 
   const handleGetNewCode = () => {
-    setCode(null);
+    setVerificationCode(null);
     setError(null);
     setSuccess(null);
     void handleGenerate();
@@ -175,7 +191,7 @@ export default function LinkRobloxPage() {
           </div>
           <div className="rounded border border-slateBlue/60 bg-[#0d121b] p-4">
             <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Verification Code</div>
-            <div className="mt-2 rounded border border-silver/30 bg-slateBlue/20 p-3 font-mono text-lg text-silver">{generatedCode}</div>
+            <div className="mt-2 rounded border border-silver/30 bg-slateBlue/20 p-3 font-mono text-lg text-silver">{verificationCode ?? 'Generate a code to begin'}</div>
             <p className="mt-4 text-sm text-slate-300">Paste this code into your Roblox profile About section, save it, and confirm.</p>
             <button onClick={handleConfirm} disabled={loading} className="mt-4 rounded border border-slateBlue/70 px-4 py-2 text-sm font-semibold uppercase tracking-[0.3em] text-silver disabled:opacity-60">Confirm</button>
           </div>
