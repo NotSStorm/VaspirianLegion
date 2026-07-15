@@ -97,12 +97,17 @@ export async function getAuthenticatedState(): Promise<AuthState> {
       return { session: null, profile: null, rosterEntry: null };
     }
 
-    const [profile, rosterEntry] = await Promise.all([
-      ensureProfileForSession(session),
-      getExistingRosterEntry(session.user.id)
-    ]);
+    try {
+      const [profile, rosterEntry] = await Promise.all([
+        ensureProfileForSession(session),
+        getExistingRosterEntry(session.user.id)
+      ]);
 
-    return { session, profile, rosterEntry };
+      return { session, profile, rosterEntry };
+    } catch (error) {
+      console.error('Profile bootstrap failed; keeping active session', error);
+      return { session, profile: null, rosterEntry: null };
+    }
   } catch (error) {
     console.error('Authenticated-state resolution failed', error);
     return { session: null, profile: null, rosterEntry: null };

@@ -1,10 +1,53 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowRight, ShieldCheck } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { resolvePostAuthPath } from '../lib/auth';
 
 export default function LoginPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [status, setStatus] = useState('Preparing sign-in...');
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    const resolveExistingSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!active || !session?.user) {
+        setStatus('Ready to sign in.');
+        return;
+      }
+
+      const fromPath = typeof (location.state as { from?: string } | null)?.from === 'string'
+        ? (location.state as { from?: string }).from
+        : null;
+      const targetPath = fromPath && fromPath !== '/login' ? fromPath : await resolvePostAuthPath();
+      navigate(targetPath, { replace: true });
+    };
+
+    void resolveExistingSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!active || !session?.user) {
+        return;
+      }
+
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+        const fromPath = typeof (location.state as { from?: string } | null)?.from === 'string'
+          ? (location.state as { from?: string }).from
+          : null;
+        const targetPath = fromPath && fromPath !== '/login' ? fromPath : await resolvePostAuthPath();
+        navigate(targetPath, { replace: true });
+      }
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, [location.state, navigate]);
 
   const handleDiscordLogin = async () => {
     setStatus('Redirecting to Discord...');
