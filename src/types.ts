@@ -76,3 +76,12 @@ export interface Application {
   reviewed_at?: string | null;
   created_at: string;
 }
+
+export interface RosterEntry {
+  id: string;
+  profile_id: string;
+  rank: string;
+  callsign: string;
+  company?: string | null;
+  created_at: string;
+}

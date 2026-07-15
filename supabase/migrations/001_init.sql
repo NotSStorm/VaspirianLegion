@@ -81,6 +81,15 @@ create table if not exists applications (
   created_at timestamptz not null default now()
 );
 
+create table if not exists roster (
+  id uuid primary key default gen_random_uuid(),
+  profile_id uuid references profiles(id) on delete cascade unique,
+  rank text not null default 'CST',
+  callsign text not null,
+  company text,
+  created_at timestamptz not null default now()
+);
+
 alter table profiles enable row level security;
 alter table roster_qualifications enable row level security;
 alter table battles enable row level security;
@@ -89,6 +98,7 @@ alter table lore_timeline enable row level security;
 alter table command_slots enable row level security;
 alter table site_settings enable row level security;
 alter table applications enable row level security;
+alter table roster enable row level security;
 
 create policy if not exists profiles_select_public on profiles
   for select using (true);
@@ -116,3 +126,6 @@ create policy if not exists site_settings_select_public on site_settings
 
 create policy if not exists applications_select_owner on applications
   for select using (auth.uid() = profile_id);
+
+create policy if not exists roster_select_public on roster
+  for select using (true);

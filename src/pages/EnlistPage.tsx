@@ -19,7 +19,7 @@ export default function EnlistPage() {
         <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">[ Enlistment ]</div>
         <h2 className="mt-2 text-3xl font-semibold uppercase tracking-[0.2em] text-silver">Serve With Honor</h2>
         <p className="mt-4 max-w-3xl text-slate-300">
-          Join the Grand Andouran Battery as a gunner, engineer, or field security specialist and stand ready for imperial service.
+          Join the Grand Andouran Battery as a gunner, engineer, or field security specialist and stand ready for imperial service. We welcome applicants connected to the wider Andouran Empire or Fuirst Keisariks Arm Corps communities.
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <a href="/login" className="rounded border border-silver/50 bg-silver px-4 py-3 text-sm font-semibold uppercase tracking-[0.3em] text-slateBlue">Join the Battery</a>

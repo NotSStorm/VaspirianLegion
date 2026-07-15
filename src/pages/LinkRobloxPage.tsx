@@ -1,13 +1,157 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
+import { getAuthenticatedState, resolvePostAuthPath } from '../lib/auth';
+
+function randomCode() {
+  return `LEGION-${Math.floor(Math.random() * 0x1000000).toString(16).toUpperCase()}`;
+}
 
 export default function LinkRobloxPage() {
+  const navigate = useNavigate();
   const [username, setUsername] = useState('');
   const [code, setCode] = useState<string | null>(null);
-  const generatedCode = useMemo(() => (code ? code : `LEGION-${Math.floor(Math.random() * 0x1000000).toString(16).toUpperCase()}`), [code]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [hasSession, setHasSession] = useState(false);
 
-  const handleGenerate = () => {
-    setCode(generatedCode);
+  useEffect(() => {
+    const initialize = async () => {
+      const { session } = await getAuthenticatedState();
+      if (!session?.user) {
+        navigate('/login', { replace: true });
+        return;
+      }
+      setHasSession(true);
+    };
+
+    void initialize();
+  }, [navigate]);
+
+  const generatedCode = useMemo(() => code ?? randomCode(), [code]);
+
+  const handleGenerate = async () => {
+    if (!hasSession) {
+      navigate('/login', { replace: true });
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setLoading(true);
+
+    try {
+      const { session } = await getAuthenticatedState();
+      if (!session?.user) {
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      const trimmedUsername = username.trim();
+      if (!trimmedUsername) {
+        setError('Enter your Roblox username before requesting a code.');
+        return;
+      }
+
+      const response = await fetch('/api/roblox/verify-username', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: trimmedUsername })
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload?.message || 'Unable to validate that Roblox username right now.');
+      }
+
+      const nextCode = randomCode();
+      const { error: profileError } = await supabase.from('profiles').update({
+        roblox_verification_code: nextCode,
+        roblox_username: trimmedUsername
+      }).eq('id', session.user.id);
+
+      if (profileError) {
+        throw profileError;
+      }
+
+      setCode(nextCode);
+      setSuccess('A fresh verification code has been saved to your profile.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to generate a verification code.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (!hasSession) {
+      navigate('/login', { replace: true });
+      return;
+    }
+
+    setError(null);
+    setSuccess(null);
+    setLoading(true);
+
+    try {
+      const { session, profile } = await getAuthenticatedState();
+      if (!session?.user) {
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      const trimmedUsername = username.trim();
+      const verificationCode = profile?.roblox_verification_code || code;
+      if (!trimmedUsername || !verificationCode) {
+        setError('Generate a code first and confirm your Roblox username.');
+        return;
+      }
+
+      const response = await fetch('/api/roblox/verify-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: trimmedUsername, code: verificationCode })
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.verified) {
+        throw new Error(payload?.message || 'Code not found on your profile — make sure you saved it and try again');
+      }
+
+      const { error: profileError } = await supabase.from('profiles').update({
+        roblox_id: payload.robloxId,
+        roblox_username: trimmedUsername,
+        roblox_verified_at: new Date().toISOString(),
+        roblox_verification_code: verificationCode
+      }).eq('id', session.user.id);
+
+      if (profileError) {
+        throw profileError;
+      }
+
+      const nextPath = await resolvePostAuthPath();
+      navigate(nextPath, { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Verification failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUseDifferentAccount = () => {
+    setCode(null);
+    setError(null);
+    setSuccess(null);
+    setUsername('');
+  };
+
+  const handleGetNewCode = () => {
+    setCode(null);
+    setError(null);
+    setSuccess(null);
+    void handleGenerate();
   };
 
   return (
@@ -16,23 +160,28 @@ export default function LinkRobloxPage() {
         <div className="mb-4 flex justify-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-full border border-silver/40 bg-slateBlue/30"><ShieldCheck className="h-6 w-6 text-silver" /></div>
         </div>
-        <div className="text-center text-[10px] uppercase tracking-[0.35em] text-slate-400">Temporary Verification</div>
+        <div className="text-center text-[10px] uppercase tracking-[0.35em] text-slate-400">Verification</div>
         <h2 className="mt-2 text-center text-3xl font-semibold uppercase tracking-[0.2em] text-silver">Link Your Roblox Account</h2>
-        <p className="mt-4 text-center text-slate-300">This temporary profile-bio verification method will be replaced by one-click Roblox OAuth once approval is granted.</p>
+        <p className="mt-4 text-center text-slate-300">Enter your Roblox username, save the code to your profile bio, and confirm it here.</p>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_1fr]">
           <div>
             <label className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Your Roblox Username</label>
             <input value={username} onChange={(e) => setUsername(e.target.value)} className="mt-2 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-silver" />
-            <button onClick={handleGenerate} className="mt-4 rounded border border-silver/50 bg-silver px-4 py-2 text-sm font-semibold uppercase tracking-[0.3em] text-slateBlue">Get My Code</button>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button onClick={handleGetNewCode} disabled={loading} className="rounded border border-silver/50 bg-silver px-4 py-2 text-sm font-semibold uppercase tracking-[0.3em] text-slateBlue disabled:opacity-60">Get My Code</button>
+              <button onClick={handleUseDifferentAccount} disabled={loading} className="rounded border border-slateBlue/70 px-4 py-2 text-sm font-semibold uppercase tracking-[0.3em] text-silver disabled:opacity-60">Use a different Roblox account</button>
+            </div>
           </div>
           <div className="rounded border border-slateBlue/60 bg-[#0d121b] p-4">
             <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Verification Code</div>
             <div className="mt-2 rounded border border-silver/30 bg-slateBlue/20 p-3 font-mono text-lg text-silver">{generatedCode}</div>
             <p className="mt-4 text-sm text-slate-300">Paste this code into your Roblox profile About section, save it, and confirm.</p>
-            <button className="mt-4 rounded border border-slateBlue/70 px-4 py-2 text-sm font-semibold uppercase tracking-[0.3em] text-silver">Confirm</button>
+            <button onClick={handleConfirm} disabled={loading} className="mt-4 rounded border border-slateBlue/70 px-4 py-2 text-sm font-semibold uppercase tracking-[0.3em] text-silver disabled:opacity-60">Confirm</button>
           </div>
         </div>
+        {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
+        {success && <p className="mt-4 text-sm text-emerald-400">{success}</p>}
       </div>
     </section>
   );
