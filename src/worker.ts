@@ -36,17 +36,28 @@ async function verifyRobloxUsername(username: string) {
   }
 
   try {
-    const userResponse = await fetch(`https://users.roblox.com/v1/users/get-by-username?username=${encodeURIComponent(username)}`);
+    const userResponse = await fetch('https://users.roblox.com/v1/usernames/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
+    });
+
+    if (userResponse.status === 429) {
+      return { verified: false, message: 'Roblox is rate limiting username checks right now. Please try again shortly.' };
+    }
+
     if (!userResponse.ok) {
+      return { verified: false, message: 'Unable to validate that Roblox username right now.' };
+    }
+
+    const userData = await userResponse.json().catch(() => ({}));
+    const resolvedUser = Array.isArray(userData?.data) && userData.data.length > 0 ? userData.data[0] : null;
+
+    if (!resolvedUser?.id) {
       return { verified: false, message: 'That Roblox username could not be found.' };
     }
 
-    const userData = await userResponse.json();
-    if (!userData?.id) {
-      return { verified: false, message: 'That Roblox username could not be found.' };
-    }
-
-    return { verified: true, robloxId: userData.id };
+    return { verified: true, robloxId: resolvedUser.id, displayName: resolvedUser.displayName || resolvedUser.name || '' };
   } catch {
     return { verified: false, message: 'Unable to reach the Roblox API right now.' };
   }
@@ -59,26 +70,19 @@ async function verifyRobloxCode(username: string, code: string) {
   }
 
   try {
-    const profileResponse = await fetch(`https://users.roblox.com/v1/users/${usernameCheck.robloxId}/display-name`);
-    if (!profileResponse.ok) {
-      return { verified: false, message: 'Unable to read the Roblox profile right now.' };
-    }
-
-    const profileData = await profileResponse.json();
-    const aboutResponse = await fetch(`https://www.roblox.com/users/${usernameCheck.robloxId}/profile`);
-    if (!aboutResponse.ok) {
+    const userDetailsResponse = await fetch(`https://users.roblox.com/v1/users/${usernameCheck.robloxId}`);
+    if (!userDetailsResponse.ok) {
       return { verified: false, message: 'Unable to read the Roblox profile description right now.' };
     }
 
-    const aboutHtml = await aboutResponse.text();
-    const descriptionMatch = aboutHtml.match(/<meta name="description" content="([^"]*)"/i) || aboutHtml.match(/>([^<]{0,400}?)(?:<|$)/i);
-    const description = descriptionMatch?.[1]?.replace(/&quot;/g, '"').replace(/&amp;/g, '&') || '';
+    const userDetails = await userDetailsResponse.json().catch(() => ({}));
+    const description = String(userDetails?.description || '');
 
     if (!description.includes(code)) {
       return { verified: false, message: 'Code not found on your profile — make sure you saved it and try again' };
     }
 
-    return { verified: true, robloxId: usernameCheck.robloxId, description: profileData?.displayName || '' };
+    return { verified: true, robloxId: usernameCheck.robloxId, description: userDetails?.displayName || usernameCheck.displayName || '' };
   } catch {
     return { verified: false, message: 'Unable to reach the Roblox API right now.' };
   }
@@ -104,17 +108,12 @@ async function verifyRobloxGroupRole(username: string, groupUrl: string, env: an
   }
 
   try {
-    const userResponse = await fetch(`https://users.roblox.com/v1/users/get-by-username?username=${encodeURIComponent(username)}`);
-    if (!userResponse.ok) {
+    const usernameCheck = await verifyRobloxUsername(username);
+    if (!usernameCheck.verified || !usernameCheck.robloxId) {
       return { verified: false, checked: true, message: 'Unable to resolve Roblox username.' };
     }
 
-    const userData = await userResponse.json();
-    const userId = userData?.id;
-
-    if (!userId) {
-      return { verified: false, checked: true, message: 'Unable to resolve Roblox username.' };
-    }
+    const userId = usernameCheck.robloxId;
 
     const rolesResponse = await fetch(`https://groups.roblox.com/v1/users/${userId}/groups/roles`);
     if (!rolesResponse.ok) {
