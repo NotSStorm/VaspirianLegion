@@ -88,6 +88,7 @@ export default function BattlesPage() {
 
       setBattles((battleData || []) as Battle[]);
       setLogs((logData || []) as BattleStatLog[]);
+      setExpandedBattleId('');
       if (!selectedBattleId && battleData && battleData.length > 0) {
         setSelectedBattleId((battleData[0] as any).id);
       }
