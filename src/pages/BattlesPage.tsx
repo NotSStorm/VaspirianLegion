@@ -32,6 +32,7 @@ export default function BattlesPage() {
   const [unitByName, setUnitByName] = useState<Record<string, string>>({});
   const [isStaff, setIsStaff] = useState(false);
   const [selectedBattleId, setSelectedBattleId] = useState<string>('');
+  const [expandedBattleId, setExpandedBattleId] = useState<string>('');
   const [logText, setLogText] = useState('');
   const [pendingBattleDeleteId, setPendingBattleDeleteId] = useState<string | null>(null);
   const [pendingLogDeleteId, setPendingLogDeleteId] = useState<string | null>(null);
@@ -105,6 +106,28 @@ export default function BattlesPage() {
     void loadBattles();
   }, []);
 
+  const logsByBattle = useMemo(() => {
+    const grouped = new Map<string, BattleStatLog[]>();
+    logs.forEach((entry) => {
+      const existing = grouped.get(entry.battle_id) || [];
+      grouped.set(entry.battle_id, [...existing, entry]);
+    });
+    return grouped;
+  }, [logs]);
+
+  const personnelCountByBattle = useMemo(() => {
+    const counts = new Map<string, number>();
+    logsByBattle.forEach((entries, battleId) => {
+      const uniqueNames = new Set(
+        entries
+          .map((entry) => String(entry.participant_name || '').trim().toLowerCase())
+          .filter(Boolean)
+      );
+      counts.set(battleId, uniqueNames.size);
+    });
+    return counts;
+  }, [logsByBattle]);
+
   const selectedLogs = useMemo(() => logs.filter((entry) => entry.battle_id === selectedBattleId), [logs, selectedBattleId]);
   const selectedBattle = useMemo(() => battles.find((battle) => battle.id === selectedBattleId) || null, [battles, selectedBattleId]);
 
@@ -114,16 +137,22 @@ export default function BattlesPage() {
   };
 
   const syncBattleDerivedFields = async (battleId: string) => {
-    const { count, error: countError } = await supabase
+    const { data, error: queryError } = await supabase
       .from('battle_stat_logs')
-      .select('*', { count: 'exact', head: true })
+      .select('participant_name')
       .eq('battle_id', battleId);
 
-    if (countError) throw countError;
+    if (queryError) throw queryError;
+
+    const uniqueNames = new Set(
+      ((data || []) as Array<{ participant_name: string }>)
+        .map((entry) => String(entry.participant_name || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
 
     const { error: updateError } = await supabase
       .from('battles')
-      .update({ personnel_count: count || 0 })
+      .update({ personnel_count: uniqueNames.size })
       .eq('id', battleId);
 
     if (updateError) throw updateError;
@@ -140,7 +169,7 @@ export default function BattlesPage() {
         theater: 'N/A',
         commanding_officer: formState.commandingOfficer,
         personnel_count: formState.id
-          ? (battles.find((battle) => battle.id === formState.id)?.personnel_count || 0)
+          ? (personnelCountByBattle.get(formState.id) || 0)
           : 0,
         start_date: formState.date,
         threat_level: Number(formState.pointsScored) || 0,
@@ -222,6 +251,9 @@ export default function BattlesPage() {
       if (selectedBattleId === id) {
         setSelectedBattleId('');
       }
+      if (expandedBattleId === id) {
+        setExpandedBattleId('');
+      }
 
       if (formState.id === id) {
         setFormState(defaultFormState);
@@ -302,26 +334,26 @@ export default function BattlesPage() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         {battles.map((battle) => (
-          <div key={battle.id} className={selectedBattleId === battle.id ? 'rounded border border-silver/40 p-1' : ''}>
+          <div key={battle.id} className={expandedBattleId === battle.id ? 'rounded border border-silver/40 p-1' : ''}>
             <BattleCard
               name={battle.name}
               classification={battle.classification}
               commandingOfficer={battle.commanding_officer}
-              personnelCount={battle.personnel_count}
+              personnelCount={personnelCountByBattle.get(battle.id) ?? battle.personnel_count}
               date={battle.start_date}
               pointsScored={battle.threat_level}
             />
             <button
               type="button"
-              onClick={() => setSelectedBattleId((current) => current === battle.id ? '' : battle.id)}
+              onClick={() => setExpandedBattleId((current) => current === battle.id ? '' : battle.id)}
               className="mt-2 rounded border border-slateBlue/70 px-3 py-1 text-xs uppercase tracking-[0.3em] text-slate-300"
             >
               View Logs
             </button>
-            {selectedBattleId === battle.id && (
+            {expandedBattleId === battle.id && (
               <div className="mt-3 rounded border border-slateBlue/60 bg-[#0d121b] p-4">
                 <div className="mb-3 text-[10px] uppercase tracking-[0.3em] text-slate-400">Battle Log Sheet</div>
-                {selectedLogs.length === 0 ? (
+                {(logsByBattle.get(battle.id) || []).length === 0 ? (
                   <p className="text-sm text-slate-400">No logs recorded for this battle yet.</p>
                 ) : (
                   <div className="overflow-auto rounded border border-slateBlue/50">
@@ -336,7 +368,7 @@ export default function BattlesPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {selectedLogs.map((entry) => (
+                        {(logsByBattle.get(battle.id) || []).map((entry) => (
                           <tr key={entry.id} className="border-t border-slateBlue/40">
                             <td className="px-3 py-2 font-semibold text-silver">{entry.participant_name}</td>
                             <td className="px-3 py-2 text-slate-300">{entry.kills}</td>
@@ -409,7 +441,7 @@ export default function BattlesPage() {
                 <label className="text-xs text-slate-400">Personnel
                   <input
                     type="number"
-                    value={formState.id ? (battles.find((battle) => battle.id === formState.id)?.personnel_count || 0) : 0}
+                    value={formState.id ? (personnelCountByBattle.get(formState.id) || 0) : 0}
                     readOnly
                     className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-slate-400"
                   />
