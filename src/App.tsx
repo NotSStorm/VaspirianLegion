@@ -23,7 +23,7 @@ type RouteAccessState = {
   robloxUsername: string | null;
 };
 
-function ProtectedRoute({ children, requireRoblox = false, requireAdmin = false }: { children: ReactNode; requireRoblox?: boolean; requireAdmin?: boolean }) {
+function ProtectedRoute({ children, requireRoblox = false, requireStaff = false }: { children: ReactNode; requireRoblox?: boolean; requireStaff?: boolean }) {
   const location = useLocation();
   const [accessState, setAccessState] = useState<RouteAccessState>({
     loading: true,
@@ -73,7 +73,7 @@ function ProtectedRoute({ children, requireRoblox = false, requireAdmin = false 
     return <Navigate to="/link-roblox" replace />;
   }
 
-  if (requireAdmin && accessState.role !== 'admin') {
+  if (requireStaff && accessState.role !== 'admin' && accessState.role !== 'officer') {
     return <Navigate to="/" replace />;
   }
 
@@ -112,7 +112,7 @@ function App() {
         <Route
           path="/admin"
           element={(
-            <ProtectedRoute requireRoblox requireAdmin>
+            <ProtectedRoute requireRoblox requireStaff>
               <AdminPage />
             </ProtectedRoute>
           )}

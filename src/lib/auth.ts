@@ -123,6 +123,10 @@ export function resolveRouteForAuthState(profile: Profile | null, rosterEntry: R
     return '/link-roblox';
   }
 
+  if (profile.role === 'admin' || profile.role === 'officer') {
+    return '/admin';
+  }
+
   if (!rosterEntry) {
     return '/enlist/apply';
   }
