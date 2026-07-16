@@ -11,6 +11,18 @@ function normalizeDiscordName(raw?: string | null) {
   return value.startsWith('@') ? value : `@${value}`;
 }
 
+function resolveErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === 'object' && 'message' in error && typeof (error as { message?: unknown }).message === 'string') {
+    return (error as { message: string }).message;
+  }
+
+  return fallback;
+}
+
 export default function ApplyPage() {
   const [timezone, setTimezone] = useState('');
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -106,6 +118,7 @@ export default function ApplyPage() {
     try {
       const { error } = await supabase.from('applications').insert({
         profile_id: resolvedProfile!.id,
+        service_number: `APP-${Date.now().toString(36).toUpperCase()}`,
         callsign: callsign,
         timezone: normalizedTimezone,
         requested_group_join: true,
@@ -120,9 +133,7 @@ export default function ApplyPage() {
       setMessage('Application submitted — pending HR review.');
     } catch (error) {
       console.error('Application submission failed', error);
-      const message = error instanceof Error
-        ? error.message
-        : 'Unable to submit your application.';
+      const message = resolveErrorMessage(error, 'Unable to submit your application.');
       const friendlyMessage = /network|fetch|timeout/i.test(message)
         ? 'The request failed because of a network issue. Please try again.'
         : /not authenticated|jwt|session/i.test(message)
