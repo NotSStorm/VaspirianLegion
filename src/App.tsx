@@ -9,6 +9,8 @@ import CommandPage from './pages/CommandPage';
 import BattlesPage from './pages/BattlesPage';
 import SchedulePage from './pages/SchedulePage';
 import MedalsPage from './pages/MedalsPage';
+import LeaderboardPage from './pages/LeaderboardPage';
+import RallyTrackerPage from './pages/RallyTrackerPage';
 import LoginPage from './pages/LoginPage';
 import LinkRobloxPage from './pages/LinkRobloxPage';
 import ApplyPage from './pages/ApplyPage';
@@ -100,6 +102,8 @@ function App() {
         <Route path="/battles" element={<BattlesPage />} />
         <Route path="/schedule" element={<SchedulePage />} />
         <Route path="/medals" element={<MedalsPage />} />
+        <Route path="/leaderboard" element={<LeaderboardPage />} />
+        <Route path="/rally-tracker" element={<RallyTrackerPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route
           path="/link-roblox"

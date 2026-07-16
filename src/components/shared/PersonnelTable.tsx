@@ -1,7 +1,7 @@
 interface PersonnelRow {
-  username: string;
-  callsign: string;
-  rank: string;
+  combinedName: string;
+  unit: string;
+  groupRank: string;
   tags: string[];
 }
 
@@ -15,18 +15,18 @@ export default function PersonnelTable({ rows }: PersonnelTableProps) {
       <table className="min-w-full text-left text-sm">
         <thead className="bg-slateBlue/30 text-slate-200">
           <tr>
-            <th className="px-4 py-3">Username</th>
-            <th className="px-4 py-3">Callsign / Rank</th>
-            <th className="px-4 py-3">Rank</th>
+            <th className="px-4 py-3">Rank / Roblox Name</th>
+            <th className="px-4 py-3">Unit</th>
+            <th className="px-4 py-3">Group Rank</th>
             <th className="px-4 py-3">Tags</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.username} className="border-t border-slateBlue/40">
-              <td className="px-4 py-3 font-semibold text-silver">{row.username}</td>
-              <td className="px-4 py-3">{row.callsign}</td>
-              <td className="px-4 py-3">{row.rank}</td>
+            <tr key={row.combinedName} className="border-t border-slateBlue/40">
+              <td className="px-4 py-3 font-semibold text-silver">{row.combinedName}</td>
+              <td className="px-4 py-3">{row.unit}</td>
+              <td className="px-4 py-3">{row.groupRank}</td>
               <td className="px-4 py-3">
                 <div className="flex flex-wrap gap-2">
                   {row.tags.map((tag) => (

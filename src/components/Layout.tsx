@@ -13,7 +13,9 @@ const navItems = [
   { to: '/command', label: 'COMMAND' },
   { to: '/battles', label: 'BATTLES' },
   { to: '/schedule', label: 'SCHEDULE' },
-  { to: '/medals', label: 'MEDALS' }
+  { to: '/medals', label: 'MEDALS' },
+  { to: '/leaderboard', label: 'LEADERBOARD' },
+  { to: '/rally-tracker', label: 'RALLY TRACKER' }
 ];
 
 type HeaderUser = {
@@ -114,7 +116,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               <Shield className="h-6 w-6 text-silver" />
             </div>
             <div>
-              <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Grand Andouran Battery</div>
+              <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">{headerUser?.discordUsername ? `${headerUser.discordUsername} — Grand Andouran Battery` : 'Grand Andouran Battery'}</div>
               <div className="text-sm font-semibold uppercase tracking-[0.3em] text-silver">Vaspirian Legion</div>
             </div>
           </NavLink>
@@ -140,7 +142,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 </div>
                 <div className="leading-tight">
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-silver">{roleLabel}</div>
-                  <div className="max-w-[160px] truncate text-xs text-slate-300">{headerUser.discordUsername}</div>
+                  <div className="max-w-[160px] truncate text-xs text-slate-300">{headerUser.robloxId ? 'Roblox Linked' : 'Roblox Pending'}</div>
                 </div>
               </div>
             )}
