@@ -1,48 +1,102 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
-type PerformanceLog = {
+type Battle = {
   id: string;
-  profile_id: string;
-  logged_on: string;
-  period: 'weekly' | 'monthly' | string;
+  start_date: string;
+};
+
+type StatLog = {
+  id: string;
+  battle_id: string;
+  participant_name: string;
+  unit: string;
+  kills: number;
+  deaths: number;
+  assists: number;
+};
+
+type LeaderEntry = {
+  name: string;
+  unit: string;
   total: number;
   kills: number;
   deaths: number;
   assists: number;
-  company?: string | null;
-  profile?: {
-    roblox_username?: string | null;
-    discord_username?: string | null;
-  } | null;
 };
 
 export default function LeaderboardPage() {
-  const [logs, setLogs] = useState<PerformanceLog[]>([]);
+  const [logs, setLogs] = useState<StatLog[]>([]);
+  const [battleDates, setBattleDates] = useState<Map<string, Date>>(new Map());
 
   useEffect(() => {
     const load = async () => {
-      const { data } = await supabase
-        .from('performance_logs')
-        .select('id, profile_id, logged_on, period, total, kills, deaths, assists, company, profile:profiles!performance_logs_profile_id_fkey(roblox_username, discord_username)')
-        .order('logged_on', { ascending: false });
-      setLogs((data || []) as PerformanceLog[]);
+      const [{ data: statData }, { data: battleData }] = await Promise.all([
+        supabase
+          .from('battle_stat_logs')
+          .select('id, battle_id, participant_name, unit, kills, deaths, assists'),
+        supabase.from('battles').select('id, start_date')
+      ]);
+
+      setLogs((statData || []) as StatLog[]);
+      const dateMap = new Map<string, Date>();
+      ((battleData || []) as Battle[]).forEach((battle) => {
+        const parsed = new Date(battle.start_date);
+        if (!Number.isNaN(parsed.getTime())) {
+          dateMap.set(battle.id, parsed);
+        }
+      });
+      setBattleDates(dateMap);
     };
     void load();
   }, []);
 
-  const weekly = useMemo(() => logs.filter((log) => log.period === 'weekly').sort((a, b) => b.total - a.total), [logs]);
-  const monthly = useMemo(() => logs.filter((log) => log.period === 'monthly').sort((a, b) => b.total - a.total), [logs]);
+  const aggregate = (period: 'weekly' | 'monthly') => {
+    const now = new Date();
+    const weeklyCutoff = new Date(now);
+    weeklyCutoff.setDate(now.getDate() - 7);
+    const monthlyCutoff = new Date(now.getFullYear(), now.getMonth(), 1);
+    const cutoff = period === 'weekly' ? weeklyCutoff : monthlyCutoff;
 
-  const renderBoard = (title: string, board: PerformanceLog[]) => (
+    const map = new Map<string, LeaderEntry>();
+    logs.forEach((log) => {
+      const date = battleDates.get(log.battle_id);
+      if (!date || date < cutoff) {
+        return;
+      }
+
+      const key = `${log.participant_name}::${log.unit}`;
+      const existing = map.get(key) || {
+        name: log.participant_name,
+        unit: log.unit,
+        total: 0,
+        kills: 0,
+        deaths: 0,
+        assists: 0
+      };
+
+      existing.kills += Number(log.kills) || 0;
+      existing.deaths += Number(log.deaths) || 0;
+      existing.assists += Number(log.assists) || 0;
+      existing.total = existing.kills + existing.assists;
+      map.set(key, existing);
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  };
+
+  const weekly = useMemo(() => aggregate('weekly'), [logs, battleDates]);
+  const monthly = useMemo(() => aggregate('monthly'), [logs, battleDates]);
+
+  const renderBoard = (title: string, board: LeaderEntry[]) => (
     <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
       <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">{title}</h3>
       <div className="mt-4 space-y-2">
         {board.length === 0 ? (
           <p className="text-sm text-slate-400">No data logged yet.</p>
         ) : board.map((entry, index) => (
-          <div key={entry.id} className="flex items-center justify-between rounded border border-slateBlue/60 px-3 py-2 text-sm">
-            <div className="text-slate-300">{index + 1}. {entry.profile?.roblox_username || entry.profile?.discord_username || entry.profile_id}</div>
+          <div key={`${entry.name}-${entry.unit}`} className="flex items-center justify-between rounded border border-slateBlue/60 px-3 py-2 text-sm">
+            <div className="text-slate-300">{index + 1}. {entry.name} <span className="text-slate-500">({entry.unit})</span></div>
             <div className="text-silver">Total {entry.total} | K {entry.kills} D {entry.deaths} A {entry.assists}</div>
           </div>
         ))}

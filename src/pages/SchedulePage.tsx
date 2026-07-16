@@ -117,21 +117,39 @@ export default function SchedulePage() {
           <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">Add Schedule Event</h3>
           <p className="mt-2 text-sm text-slate-300">Use this format: day/region classification, rally time, CO, and notes/link in the note field.</p>
           <div className="mt-4 grid gap-3">
-            <input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="Event title" className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+            <label className="text-xs text-slate-400">Event Title
+              <input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="Event title" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+            </label>
             <div className="grid grid-cols-2 gap-3">
-              <input value={form.classification} onChange={(event) => setForm((prev) => ({ ...prev, classification: event.target.value }))} placeholder="Classification" className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
-              <input value={form.status} onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value }))} placeholder="Status" className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+              <label className="text-xs text-slate-400">Classification
+                <input value={form.classification} onChange={(event) => setForm((prev) => ({ ...prev, classification: event.target.value }))} placeholder="Classification" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+              </label>
+              <label className="text-xs text-slate-400">Status
+                <input value={form.status} onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value }))} placeholder="Status" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+              </label>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <input value={form.theater} onChange={(event) => setForm((prev) => ({ ...prev, theater: event.target.value }))} placeholder="Theater" className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
-              <input value={form.commandingOfficer} onChange={(event) => setForm((prev) => ({ ...prev, commandingOfficer: event.target.value }))} placeholder="CO" className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+              <label className="text-xs text-slate-400">Theater / Region
+                <input value={form.theater} onChange={(event) => setForm((prev) => ({ ...prev, theater: event.target.value }))} placeholder="Theater" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+              </label>
+              <label className="text-xs text-slate-400">CO
+                <input value={form.commandingOfficer} onChange={(event) => setForm((prev) => ({ ...prev, commandingOfficer: event.target.value }))} placeholder="CO" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+              </label>
             </div>
             <div className="grid grid-cols-3 gap-3">
-              <input type="number" value={form.personnelCount} onChange={(event) => setForm((prev) => ({ ...prev, personnelCount: Number(event.target.value) }))} placeholder="Personnel" className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
-              <input value={form.startDate} onChange={(event) => setForm((prev) => ({ ...prev, startDate: event.target.value }))} placeholder="Date / Rally time" className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
-              <input type="number" min={1} max={5} value={form.threatLevel} onChange={(event) => setForm((prev) => ({ ...prev, threatLevel: Number(event.target.value) }))} placeholder="Threat 1-5" className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+              <label className="text-xs text-slate-400">Personnel
+                <input type="number" value={form.personnelCount} onChange={(event) => setForm((prev) => ({ ...prev, personnelCount: Number(event.target.value) }))} placeholder="Personnel" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+              </label>
+              <label className="text-xs text-slate-400">Date / Rally Time
+                <input value={form.startDate} onChange={(event) => setForm((prev) => ({ ...prev, startDate: event.target.value }))} placeholder="Date / Rally time" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+              </label>
+              <label className="text-xs text-slate-400">Performance (1-5)
+                <input type="number" min={1} max={5} value={form.threatLevel} onChange={(event) => setForm((prev) => ({ ...prev, threatLevel: Number(event.target.value) }))} placeholder="Performance" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+              </label>
             </div>
-            <textarea value={form.notes} onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Notes / event link" className="min-h-[100px] rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+            <label className="text-xs text-slate-400">Notes / Event Link
+              <textarea value={form.notes} onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Notes / event link" className="mt-1 min-h-[100px] w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+            </label>
             <button type="button" onClick={() => void createEvent()} className="rounded border border-silver/50 bg-silver px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slateBlue">Add Schedule Entry</button>
           </div>
         </div>

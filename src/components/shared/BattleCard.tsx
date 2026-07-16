@@ -33,7 +33,7 @@ export default function BattleCard({ name, classification, status, theater, comm
         <div><span className="text-slate-400">Date</span><div className="font-semibold text-silver">{date}</div></div>
       </div>
       <div className="mt-4">
-        <div className="mb-2 text-[10px] uppercase tracking-[0.3em] text-slate-400">Threat</div>
+        <div className="mb-2 text-[10px] uppercase tracking-[0.3em] text-slate-400">Performance</div>
         <div className="flex gap-1">
           {Array.from({ length: 5 }).map((_, index) => (
             <span key={index} className={`h-2.5 w-2.5 rounded-full ${index < threatLevel ? 'bg-silver' : 'bg-slateBlue/60'}`} />

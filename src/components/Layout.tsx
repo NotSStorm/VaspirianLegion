@@ -21,6 +21,7 @@ const navItems = [
 type HeaderUser = {
   discordUsername: string;
   robloxId: string | null;
+  robloxUsername: string | null;
   role: Role;
 };
 
@@ -55,6 +56,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       setHeaderUser({
         discordUsername: profile.discord_username || session.user.email || 'signed-in-user',
         robloxId: profile.roblox_id || null,
+        robloxUsername: profile.roblox_username || null,
         role: profile.role
       });
     };
@@ -75,13 +77,35 @@ export default function Layout({ children }: { children: ReactNode }) {
     let active = true;
 
     const loadAvatar = async () => {
-      if (!headerUser?.robloxId) {
+      let resolvedRobloxId = headerUser?.robloxId || null;
+
+      if (!resolvedRobloxId && headerUser?.robloxUsername) {
+        try {
+          const lookupResponse = await fetch('https://users.roblox.com/v1/usernames/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ usernames: [headerUser.robloxUsername], excludeBannedUsers: false })
+          });
+
+          if (lookupResponse.ok) {
+            const payload = await lookupResponse.json().catch(() => ({}));
+            const first = Array.isArray(payload?.data) ? payload.data[0] : null;
+            if (first?.id) {
+              resolvedRobloxId = String(first.id);
+            }
+          }
+        } catch {
+          resolvedRobloxId = null;
+        }
+      }
+
+      if (!resolvedRobloxId) {
         setAvatarUrl(null);
         return;
       }
 
       try {
-        const response = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${encodeURIComponent(headerUser.robloxId)}&size=150x150&format=Png&isCircular=true`);
+        const response = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${encodeURIComponent(resolvedRobloxId)}&size=150x150&format=Png&isCircular=true`);
         if (!response.ok) {
           setAvatarUrl(null);
           return;
@@ -115,9 +139,12 @@ export default function Layout({ children }: { children: ReactNode }) {
             <div className="flex h-11 w-11 items-center justify-center rounded-full border border-silver/40 bg-slateBlue/80 shadow-[0_0_18px_rgba(232,236,242,0.25)]">
               <Shield className="h-6 w-6 text-silver" />
             </div>
-            <div>
-              <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">{headerUser?.discordUsername ? `${headerUser.discordUsername} — Grand Andouran Battery` : 'Grand Andouran Battery'}</div>
-              <div className="text-sm font-semibold uppercase tracking-[0.3em] text-silver">Vaspirian Legion</div>
+            <div className="leading-tight">
+              {headerUser?.discordUsername && (
+                <div className="mb-1 text-[10px] uppercase tracking-[0.35em] text-slate-400">{headerUser.discordUsername}</div>
+              )}
+              <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Grand Andouran Battery</div>
+              <div className="text-xl font-semibold uppercase tracking-[0.2em] text-silver">Vaspirian Legion</div>
             </div>
           </NavLink>
           <button className="rounded border border-slateBlue/60 p-2 md:hidden" onClick={() => setMobileOpen((v) => !v)}>

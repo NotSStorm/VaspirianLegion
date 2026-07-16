@@ -96,7 +96,7 @@ export default function AdminPage() {
           .from('roster')
           .upsert({
             profile_id: application.profile_id,
-            rank: 'CST',
+            rank: 'SSGT',
             callsign: application.callsign
           }, { onConflict: 'profile_id' });
 

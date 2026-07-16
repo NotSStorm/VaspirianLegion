@@ -16,10 +16,30 @@ type Slot = {
   } | null;
 };
 
-const REQUIRED_MELROSE_TITLES = ['Commander', 'Executive', 'Gun Team I', 'Gun Team II', 'Gun Team III'];
+const REQUIRED_STRUCTURE = [
+  {
+    tier: 'Grand Battery Command',
+    company: 'Battery Command',
+    titles: ['Commanding Officer', 'Executive Officer', 'Battery Assistant']
+  },
+  {
+    tier: '82nd Pirkland',
+    company: '82nd Pirkland',
+    titles: ['Commander', 'Executive', 'Komendant des Flag']
+  },
+  {
+    tier: '87th Melrose',
+    company: '87th Melrose',
+    titles: ['Commander', 'Executive', 'Gun Team Lead I', 'Gun Team Lead II', 'Gun Team Lead III']
+  }
+];
 
 function normalizeSlotTitle(title: string) {
-  return title === 'Security Slot' ? 'Komendant des Flag' : title;
+  if (title === 'Security Slot') return 'Komendant des Flag';
+  if (title === 'Gun Team I') return 'Gun Team Lead I';
+  if (title === 'Gun Team II') return 'Gun Team Lead II';
+  if (title === 'Gun Team III') return 'Gun Team Lead III';
+  return title;
 }
 
 export default function CommandPage() {
@@ -99,33 +119,41 @@ export default function CommandPage() {
     }
   };
 
-  const seedMelroseSlots = async () => {
+  const ensureCommandStructure = async () => {
     setError(null);
     setActiveSlotId('seed');
 
     try {
-      const melrose = slots.filter((slot) => slot.company === '87th Melrose');
-      const existingTitles = new Set(melrose.map((slot) => normalizeSlotTitle(slot.slot_title)));
-      const missing = REQUIRED_MELROSE_TITLES.filter((title) => !existingTitles.has(title));
+      const legacyUpdates = slots
+        .filter((slot) => normalizeSlotTitle(slot.slot_title) !== slot.slot_title)
+        .map((slot) => supabase.from('command_slots').update({ slot_title: normalizeSlotTitle(slot.slot_title) }).eq('id', slot.id));
+      await Promise.all(legacyUpdates);
 
-      if (missing.length === 0) {
-        setActiveSlotId(null);
-        return;
+      const payload: Array<{ tier: string; company: string; slot_title: string; sort_order: number }> = [];
+      REQUIRED_STRUCTURE.forEach((group) => {
+        const groupSlots = slots.filter((slot) => slot.tier === group.tier || slot.company === group.company);
+        const existing = new Set(groupSlots.map((slot) => normalizeSlotTitle(slot.slot_title)));
+        const baseSort = groupSlots.length ? Math.max(...groupSlots.map((slot) => slot.sort_order)) + 1 : 1;
+        group.titles.forEach((title, index) => {
+          if (!existing.has(title)) {
+            payload.push({
+              tier: group.tier,
+              company: group.company,
+              slot_title: title,
+              sort_order: baseSort + index
+            });
+          }
+        });
+      });
+
+      if (payload.length > 0) {
+        const { error: insertError } = await supabase.from('command_slots').insert(payload);
+        if (insertError) throw insertError;
       }
 
-      const baseSort = melrose.length ? Math.max(...melrose.map((slot) => slot.sort_order)) + 1 : 1;
-      const payload = missing.map((title, index) => ({
-        tier: '87th Melrose',
-        company: '87th Melrose',
-        slot_title: title,
-        sort_order: baseSort + index
-      }));
-
-      const { error: insertError } = await supabase.from('command_slots').insert(payload);
-      if (insertError) throw insertError;
       await loadCommandData();
     } catch (seedErr) {
-      setError(seedErr instanceof Error ? seedErr.message : 'Unable to seed Melrose slots.');
+      setError(seedErr instanceof Error ? seedErr.message : 'Unable to ensure command structure.');
     } finally {
       setActiveSlotId(null);
     }
@@ -139,11 +167,11 @@ export default function CommandPage() {
         {isStaff && (
           <button
             type="button"
-            onClick={() => void seedMelroseSlots()}
+            onClick={() => void ensureCommandStructure()}
             disabled={activeSlotId === 'seed'}
             className="mt-4 rounded border border-slateBlue/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-silver disabled:opacity-60"
           >
-            {activeSlotId === 'seed' ? 'Applying...' : 'Ensure 87th Gun Teams I/II/III'}
+            {activeSlotId === 'seed' ? 'Applying...' : 'Ensure Battery/Pirkland/Melrose Structure'}
           </button>
         )}
         {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
