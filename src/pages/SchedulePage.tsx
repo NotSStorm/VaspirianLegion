@@ -54,6 +54,7 @@ export default function SchedulePage() {
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [isStaff, setIsStaff] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: '',
     classification: 'Infantry',
@@ -91,6 +92,17 @@ export default function SchedulePage() {
   useEffect(() => {
     void loadSchedule();
   }, []);
+
+  const deleteEvent = async (id: string) => {
+    setError(null);
+    try {
+      const { error: deleteError } = await supabase.from('schedule_events').delete().eq('id', id);
+      if (deleteError) throw deleteError;
+      await loadSchedule();
+    } catch (deleteErr) {
+      setError(deleteErr instanceof Error ? deleteErr.message : 'Unable to delete schedule event.');
+    }
+  };
 
   const createEvent = async () => {
     setError(null);
@@ -147,11 +159,22 @@ export default function SchedulePage() {
             <div key={item.id} className="rounded border border-slateBlue/60 bg-[#141a24] p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="text-lg font-semibold text-silver">{item.name}</div>
-                <span className="rounded border border-slateBlue/60 px-2 py-1 text-xs uppercase tracking-[0.3em] text-slate-300">{item.classification}</span>
+                <div className="flex items-center gap-2">
+                  <span className="rounded border border-slateBlue/60 px-2 py-1 text-xs uppercase tracking-[0.3em] text-slate-300">{item.classification}</span>
+                  {isStaff && (
+                    <button
+                      type="button"
+                      onClick={() => setPendingDeleteId(item.id)}
+                      className="rounded border border-red-500/60 px-2 py-1 text-xs uppercase tracking-[0.3em] text-red-300"
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="mt-4 grid gap-3 text-sm text-slate-300 sm:grid-cols-2">
                 <div><span className="text-slate-400">CO</span><div className="font-semibold text-silver">{item.commanding_officer}</div></div>
-                <div><span className="text-slate-400">Personnel</span><div className="font-semibold text-silver">{item.personnel_count}</div></div>
+                <div><span className="text-slate-400">Cap</span><div className="font-semibold text-silver">{item.personnel_count}</div></div>
                 <div><span className="text-slate-400">Date</span><div className="font-semibold text-silver">{formatEventDate(item.start_date)}</div></div>
                 <div><span className="text-slate-400">Rally Time</span><div className="font-semibold text-silver">{timeInfo.time} <span className="text-slate-400">({timeInfo.timezone})</span></div></div>
               </div>
@@ -180,7 +203,7 @@ export default function SchedulePage() {
               </label>
             </div>
             <div className="grid grid-cols-3 gap-3">
-              <label className="text-xs text-slate-400">Personnel
+              <label className="text-xs text-slate-400">Cap
                 <input type="number" value={form.personnelCount} onChange={(event) => setForm((prev) => ({ ...prev, personnelCount: Number(event.target.value) }))} placeholder="Personnel" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
               </label>
               <label className="text-xs text-slate-400">Date
@@ -194,6 +217,37 @@ export default function SchedulePage() {
               <textarea value={form.notes} onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Notes / event link" className="mt-1 min-h-[100px] w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
             </label>
             <button type="button" onClick={() => void createEvent()} className="rounded border border-silver/50 bg-silver px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slateBlue">Add Schedule Entry</button>
+          </div>
+        </div>
+      )}
+
+      {pendingDeleteId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded border border-slateBlue/70 bg-[#141a24] p-6">
+            <h4 className="text-lg font-semibold uppercase tracking-[0.2em] text-silver">Delete Schedule Event</h4>
+            <p className="mt-3 text-sm text-slate-300">This schedule event will be permanently removed. Continue?</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingDeleteId(null)}
+                className="rounded border border-slateBlue/70 px-3 py-2 text-xs uppercase tracking-[0.3em] text-slate-300"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const targetId = pendingDeleteId;
+                  setPendingDeleteId(null);
+                  if (targetId) {
+                    await deleteEvent(targetId);
+                  }
+                }}
+                className="rounded border border-red-500/60 bg-red-500/10 px-3 py-2 text-xs uppercase tracking-[0.3em] text-red-300"
+              >
+                Confirm Delete
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -313,7 +313,7 @@ export default function BattlesPage() {
             />
             <button
               type="button"
-              onClick={() => setSelectedBattleId(battle.id)}
+              onClick={() => setSelectedBattleId((current) => current === battle.id ? '' : battle.id)}
               className="mt-2 rounded border border-slateBlue/70 px-3 py-1 text-xs uppercase tracking-[0.3em] text-slate-300"
             >
               View Logs

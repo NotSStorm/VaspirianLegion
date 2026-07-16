@@ -107,14 +107,16 @@ async function loadAvatarUrl(robloxId?: string | null, robloxUsername?: string |
   try {
     const response = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${encodeURIComponent(resolvedId)}&size=150x150&format=Png&isCircular=true`);
     if (!response.ok) {
-      return null;
+      return `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(resolvedId)}&width=150&height=150&format=png`;
     }
 
     const payload = await response.json().catch(() => ({}));
     const first = Array.isArray(payload?.data) ? payload.data[0] : null;
-    return first?.imageUrl ? String(first.imageUrl) : null;
+    return first?.imageUrl
+      ? String(first.imageUrl)
+      : `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(resolvedId)}&width=150&height=150&format=png`;
   } catch {
-    return null;
+    return `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(resolvedId)}&width=150&height=150&format=png`;
   }
 }
 
