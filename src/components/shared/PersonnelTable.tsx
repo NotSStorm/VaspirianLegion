@@ -2,7 +2,7 @@ interface PersonnelRow {
   combinedName: string;
   unit: string;
   groupRank: string;
-  tags: string[];
+  medals: string[];
 }
 
 interface PersonnelTableProps {
@@ -18,7 +18,7 @@ export default function PersonnelTable({ rows }: PersonnelTableProps) {
             <th className="px-4 py-3">Rank / Roblox Name</th>
             <th className="px-4 py-3">Unit</th>
             <th className="px-4 py-3">Group Rank</th>
-            <th className="px-4 py-3">Tags</th>
+            <th className="px-4 py-3">Medals</th>
           </tr>
         </thead>
         <tbody>
@@ -29,9 +29,14 @@ export default function PersonnelTable({ rows }: PersonnelTableProps) {
               <td className="px-4 py-3">{row.groupRank}</td>
               <td className="px-4 py-3">
                 <div className="flex flex-wrap gap-2">
-                  {row.tags.map((tag) => (
-                    <span key={tag} className="rounded border border-slateBlue/60 px-2 py-1 text-[10px] uppercase tracking-[0.25em] text-slate-300">{tag}</span>
+                  {row.medals.length === 0 ? (
+                    <span className="text-slate-500">None</span>
+                  ) : row.medals.slice(0, 3).map((medal) => (
+                    <span key={medal} className="rounded border border-slateBlue/60 px-2 py-1 text-[10px] uppercase tracking-[0.25em] text-slate-300">{medal}</span>
                   ))}
+                  {row.medals.length > 3 && (
+                    <span className="rounded border border-silver/30 px-2 py-1 text-[10px] uppercase tracking-[0.25em] text-slate-400">+{row.medals.length - 3} more</span>
+                  )}
                 </div>
               </td>
             </tr>

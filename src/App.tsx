@@ -15,6 +15,7 @@ import LoginPage from './pages/LoginPage';
 import LinkRobloxPage from './pages/LinkRobloxPage';
 import ApplyPage from './pages/ApplyPage';
 import AdminPage from './pages/AdminPage';
+import ProfilePage from './pages/ProfilePage';
 import { getAuthenticatedState } from './lib/auth';
 import { supabase } from './lib/supabase';
 
@@ -118,6 +119,14 @@ function App() {
           element={(
             <ProtectedRoute requireRoblox requireStaff>
               <AdminPage />
+            </ProtectedRoute>
+          )}
+        />
+        <Route
+          path="/profile"
+          element={(
+            <ProtectedRoute>
+              <ProfilePage />
             </ProtectedRoute>
           )}
         />

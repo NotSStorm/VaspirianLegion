@@ -159,7 +159,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               ))}
             </nav>
             {headerUser && (
-              <div className="flex items-center gap-3 rounded border border-slateBlue/60 bg-[#141a24] px-3 py-2">
+              <NavLink to="/profile" className="flex items-center gap-3 rounded border border-slateBlue/60 bg-[#141a24] px-3 py-2 transition hover:border-silver/40 hover:bg-[#18202c]">
                 <div className="h-10 w-10 overflow-hidden rounded-full border border-slateBlue/60 bg-[#0d121b]">
                   {avatarUrl ? (
                     <img src={avatarUrl} alt="Roblox avatar" className="h-full w-full object-cover" />
@@ -169,9 +169,9 @@ export default function Layout({ children }: { children: ReactNode }) {
                 </div>
                 <div className="leading-tight">
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-silver">{roleLabel}</div>
-                  <div className="max-w-[160px] truncate text-xs text-slate-300">{headerUser.robloxId ? 'Roblox Linked' : 'Roblox Pending'}</div>
+                  <div className="max-w-[160px] truncate text-xs text-slate-300">{headerUser.robloxUsername || (headerUser.robloxId ? 'Roblox Linked' : 'Roblox Pending')}</div>
                 </div>
-              </div>
+              </NavLink>
             )}
           </div>
           <nav className="hidden items-center gap-5 md:flex lg:hidden">

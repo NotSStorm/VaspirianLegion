@@ -70,7 +70,7 @@ type PersonnelRow = {
   combinedName: string;
   unit: string;
   groupRank: string;
-  tags: string[];
+  medals: string[];
 };
 
 type RosterRecord = {
@@ -111,15 +111,19 @@ export default function PersonnelPage() {
       }
 
       const profileIds = (rosterData || []).map((entry: any) => entry.profile_id);
-      const { data: qualificationData } = await supabase
-        .from('roster_qualifications')
-        .select('profile_id, tag')
-        .in('profile_id', profileIds.length ? profileIds : ['00000000-0000-0000-0000-000000000000']);
+      const { data: medalData } = await supabase
+        .from('medals')
+        .select('recipient_profile_id, medal_name')
+        .in('recipient_profile_id', profileIds.length ? profileIds : ['00000000-0000-0000-0000-000000000000']);
 
-      const qualificationsByProfile = new Map<string, string[]>();
-      (qualificationData || []).forEach((qualification: any) => {
-        const existing = qualificationsByProfile.get(qualification.profile_id) || [];
-        qualificationsByProfile.set(qualification.profile_id, [...existing, String(qualification.tag)]);
+      const medalsByProfile = new Map<string, string[]>();
+      (medalData || []).forEach((medal: any) => {
+        const recipientProfileId = String(medal.recipient_profile_id || '');
+        if (!recipientProfileId) {
+          return;
+        }
+        const existing = medalsByProfile.get(recipientProfileId) || [];
+        medalsByProfile.set(recipientProfileId, [...existing, String(medal.medal_name)]);
       });
 
       const resolvedRows = await Promise.all(
@@ -131,7 +135,7 @@ export default function PersonnelPage() {
             combinedName: `${groupRank} - ${robloxName}`,
             unit: entry.company || 'Unassigned',
             groupRank,
-            tags: qualificationsByProfile.get(entry.profile_id) || []
+            medals: medalsByProfile.get(entry.profile_id) || []
           };
         })
       );
@@ -152,7 +156,7 @@ export default function PersonnelPage() {
   }, []);
 
   const visibleRows = useMemo(
-    () => rows.filter((row) => [row.combinedName, row.unit, row.groupRank].join(' ').toLowerCase().includes(query.toLowerCase())),
+    () => rows.filter((row) => [row.combinedName, row.unit, row.groupRank, row.medals.join(' ')].join(' ').toLowerCase().includes(query.toLowerCase())),
     [query, rows]
   );
 
