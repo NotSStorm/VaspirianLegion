@@ -14,6 +14,7 @@ type StatLog = {
   kills: number;
   deaths: number;
   assists: number;
+  created_at: string;
 };
 
 type TrendPoint = {
@@ -38,7 +39,7 @@ export default function RallyTrackerPage() {
     const load = async () => {
       const [{ data: battles }, { data: logs }] = await Promise.all([
         supabase.from('battles').select('id, name, start_date').order('start_date', { ascending: true }),
-        supabase.from('battle_stat_logs').select('battle_id, participant_name, unit, kills, deaths, assists')
+        supabase.from('battle_stat_logs').select('battle_id, participant_name, unit, kills, deaths, assists, created_at')
       ]);
 
       const now = new Date();
@@ -54,35 +55,52 @@ export default function RallyTrackerPage() {
         battleMap.set(battle.id, battle);
       });
 
-      const grouped = new Map<string, { melrose: Set<string>; pirkland: Set<string>; total: Set<string> }>();
-      ((logs || []) as StatLog[]).forEach((entry) => {
+      const resolveDate = (entry: StatLog) => {
         const battle = battleMap.get(entry.battle_id);
-        if (!battle) return;
-        const date = new Date(battle.start_date);
-        if (Number.isNaN(date.getTime()) || date < cutoff) return;
+        const battleDate = battle ? new Date(battle.start_date) : null;
+        if (battleDate && !Number.isNaN(battleDate.getTime())) {
+          return battleDate;
+        }
 
-        const key = date.toISOString().slice(0, 10);
-        const existing = grouped.get(key) || { melrose: new Set<string>(), pirkland: new Set<string>(), total: new Set<string>() };
-        const name = entry.participant_name.trim();
-        if (!name) return;
+        const createdAt = new Date(entry.created_at);
+        if (!Number.isNaN(createdAt.getTime())) {
+          return createdAt;
+        }
 
-        existing.total.add(name);
-        const bucket = unitBucket(entry.unit || '');
-        if (bucket === 'melrose') existing.melrose.add(name);
-        if (bucket === 'pirkland') existing.pirkland.add(name);
-        grouped.set(key, existing);
-      });
+        return null;
+      };
 
-      const resolved = Array.from(grouped.entries())
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([date, value]) => ({
-          date,
-          melrose: value.melrose.size,
-          pirkland: value.pirkland.size,
-          total: value.total.size
-        }));
+      const buildPoints = (selectedCutoff: Date | null) => {
+        const grouped = new Map<string, { melrose: Set<string>; pirkland: Set<string>; total: Set<string> }>();
+        ((logs || []) as StatLog[]).forEach((entry) => {
+          const date = resolveDate(entry);
+          if (!date || (selectedCutoff && date < selectedCutoff)) return;
 
-      setPoints(resolved);
+          const key = date.toISOString().slice(0, 10);
+          const existing = grouped.get(key) || { melrose: new Set<string>(), pirkland: new Set<string>(), total: new Set<string>() };
+          const name = entry.participant_name.trim();
+          if (!name) return;
+
+          existing.total.add(name);
+          const bucket = unitBucket(entry.unit || '');
+          if (bucket === 'melrose') existing.melrose.add(name);
+          if (bucket === 'pirkland') existing.pirkland.add(name);
+          grouped.set(key, existing);
+        });
+
+        return Array.from(grouped.entries())
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([date, value]) => ({
+            date,
+            melrose: value.melrose.size,
+            pirkland: value.pirkland.size,
+            total: value.total.size
+          }));
+      };
+
+      const resolved = buildPoints(cutoff);
+
+      setPoints(resolved.length > 0 || (logs || []).length === 0 ? resolved : buildPoints(null));
     };
 
     void load();

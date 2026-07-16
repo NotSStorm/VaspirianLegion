@@ -39,15 +39,22 @@ export default function BattlesPage() {
   const [formState, setFormState] = useState({
     id: '',
     name: '',
-    classification: 'Public',
-    status: 'Pending',
-    theater: '',
+    classification: 'EU',
     commandingOfficer: '',
-    personnelCount: 0,
     date: '',
-    threatLevel: 1,
+    pointsScored: 0,
     description: ''
   });
+
+  const defaultFormState = {
+    id: '',
+    name: '',
+    classification: 'EU',
+    commandingOfficer: '',
+    date: '',
+    pointsScored: 0,
+    description: ''
+  };
 
   const loadBattles = async () => {
     setError(null);
@@ -106,18 +113,37 @@ export default function BattlesPage() {
     return unitByName[normalized] || 'Unassigned';
   };
 
+  const syncBattleDerivedFields = async (battleId: string) => {
+    const { count, error: countError } = await supabase
+      .from('battle_stat_logs')
+      .select('*', { count: 'exact', head: true })
+      .eq('battle_id', battleId);
+
+    if (countError) throw countError;
+
+    const { error: updateError } = await supabase
+      .from('battles')
+      .update({ personnel_count: count || 0 })
+      .eq('id', battleId);
+
+    if (updateError) throw updateError;
+  };
+
   const saveBattle = async () => {
     setError(null);
     try {
+      const parsedDate = new Date(formState.date);
       const payload = {
         name: formState.name,
         classification: formState.classification,
-        status: formState.status,
-        theater: formState.theater,
+        status: !Number.isNaN(parsedDate.getTime()) && parsedDate > new Date() ? 'Scheduled' : 'Completed',
+        theater: 'N/A',
         commanding_officer: formState.commandingOfficer,
-        personnel_count: Number(formState.personnelCount) || 0,
+        personnel_count: formState.id
+          ? (battles.find((battle) => battle.id === formState.id)?.personnel_count || 0)
+          : 0,
         start_date: formState.date,
-        threat_level: Math.max(1, Math.min(5, Number(formState.threatLevel) || 1)),
+        threat_level: Number(formState.pointsScored) || 0,
         description: formState.description || 'Operational record pending update.'
       };
 
@@ -129,18 +155,7 @@ export default function BattlesPage() {
         if (insertError) throw insertError;
       }
 
-      setFormState({
-        id: '',
-        name: '',
-        classification: 'Public',
-        status: 'Pending',
-        theater: '',
-        commandingOfficer: '',
-        personnelCount: 0,
-        date: '',
-        threatLevel: 1,
-        description: ''
-      });
+      setFormState(defaultFormState);
       await loadBattles();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Unable to save battle.');
@@ -173,6 +188,8 @@ export default function BattlesPage() {
 
       if (insertError) throw insertError;
 
+      await syncBattleDerivedFields(selectedBattleId);
+
       await loadBattles();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Unable to save battle stat log.');
@@ -182,8 +199,14 @@ export default function BattlesPage() {
   const deleteLog = async (id: string) => {
     setError(null);
     try {
+      const battleId = logs.find((entry) => entry.id === id)?.battle_id || null;
       const { error: deleteError } = await supabase.from('battle_stat_logs').delete().eq('id', id);
       if (deleteError) throw deleteError;
+
+      if (battleId) {
+        await syncBattleDerivedFields(battleId);
+      }
+
       await loadBattles();
     } catch (deleteErr) {
       setError(deleteErr instanceof Error ? deleteErr.message : 'Unable to delete battle log.');
@@ -201,18 +224,7 @@ export default function BattlesPage() {
       }
 
       if (formState.id === id) {
-        setFormState({
-          id: '',
-          name: '',
-          classification: 'Public',
-          status: 'Pending',
-          theater: '',
-          commandingOfficer: '',
-          personnelCount: 0,
-          date: '',
-          threatLevel: 1,
-          description: ''
-        });
+        setFormState(defaultFormState);
       }
 
       await loadBattles();
@@ -271,6 +283,8 @@ export default function BattlesPage() {
       const { error: insertError } = await supabase.from('battle_stat_logs').insert(payload);
       if (insertError) throw insertError;
 
+      await syncBattleDerivedFields(selectedBattleId);
+
       setLogText('');
       await loadBattles();
     } catch (importErr) {
@@ -292,12 +306,10 @@ export default function BattlesPage() {
             <BattleCard
               name={battle.name}
               classification={battle.classification}
-              status={battle.status}
-              theater={battle.theater}
               commandingOfficer={battle.commanding_officer}
               personnelCount={battle.personnel_count}
               date={battle.start_date}
-              threatLevel={battle.threat_level}
+              pointsScored={battle.threat_level}
             />
             <button
               type="button"
@@ -314,12 +326,9 @@ export default function BattlesPage() {
                     id: battle.id,
                     name: battle.name,
                     classification: battle.classification,
-                    status: battle.status,
-                    theater: battle.theater,
                     commandingOfficer: battle.commanding_officer,
-                    personnelCount: battle.personnel_count,
                     date: battle.start_date,
-                    threatLevel: battle.threat_level,
+                    pointsScored: battle.threat_level,
                     description: battle.description
                   })}
                   className="rounded border border-slateBlue/70 px-3 py-1 text-xs uppercase tracking-[0.3em] text-slate-300"
@@ -349,27 +358,31 @@ export default function BattlesPage() {
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="text-xs text-slate-400">Classification
-                  <input value={formState.classification} onChange={(event) => setFormState((prev) => ({ ...prev, classification: event.target.value }))} placeholder="Classification" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+                  <select value={formState.classification} onChange={(event) => setFormState((prev) => ({ ...prev, classification: event.target.value }))} className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver">
+                    <option value="Early EU">Early EU</option>
+                    <option value="EU">EU</option>
+                    <option value="NA">NA</option>
+                    <option value="Late NA">Late NA</option>
+                  </select>
                 </label>
-                <label className="text-xs text-slate-400">Status
-                  <input value={formState.status} onChange={(event) => setFormState((prev) => ({ ...prev, status: event.target.value }))} placeholder="Status" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+                <label className="text-xs text-slate-400">Date
+                  <input type="date" value={formState.date} onChange={(event) => setFormState((prev) => ({ ...prev, date: event.target.value }))} className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
                 </label>
               </div>
-              <label className="text-xs text-slate-400">Theater
-                <input value={formState.theater} onChange={(event) => setFormState((prev) => ({ ...prev, theater: event.target.value }))} placeholder="Theater" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
-              </label>
               <label className="text-xs text-slate-400">Commanding Officer
                 <input value={formState.commandingOfficer} onChange={(event) => setFormState((prev) => ({ ...prev, commandingOfficer: event.target.value }))} placeholder="Commanding officer" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
               </label>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <label className="text-xs text-slate-400">Personnel
-                  <input type="number" value={formState.personnelCount} onChange={(event) => setFormState((prev) => ({ ...prev, personnelCount: Number(event.target.value) }))} placeholder="Personnel" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+                  <input
+                    type="number"
+                    value={formState.id ? (battles.find((battle) => battle.id === formState.id)?.personnel_count || 0) : 0}
+                    readOnly
+                    className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-slate-400"
+                  />
                 </label>
-                <label className="text-xs text-slate-400">Date
-                  <input value={formState.date} onChange={(event) => setFormState((prev) => ({ ...prev, date: event.target.value }))} placeholder="Date" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
-                </label>
-                <label className="text-xs text-slate-400">Performance (1-5)
-                  <input type="number" min={1} max={5} value={formState.threatLevel} onChange={(event) => setFormState((prev) => ({ ...prev, threatLevel: Number(event.target.value) }))} placeholder="Performance" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+                <label className="text-xs text-slate-400">Points Scored
+                  <input type="number" min={0} value={formState.pointsScored} onChange={(event) => setFormState((prev) => ({ ...prev, pointsScored: Number(event.target.value) }))} placeholder="Points scored" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
                 </label>
               </div>
               <label className="text-xs text-slate-400">Battle Notes

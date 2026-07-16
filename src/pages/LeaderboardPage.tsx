@@ -14,6 +14,7 @@ type StatLog = {
   kills: number;
   deaths: number;
   assists: number;
+  created_at: string;
 };
 
 type LeaderEntry = {
@@ -29,12 +30,26 @@ export default function LeaderboardPage() {
   const [logs, setLogs] = useState<StatLog[]>([]);
   const [battleDates, setBattleDates] = useState<Map<string, Date>>(new Map());
 
+  const resolveLogDate = (log: StatLog) => {
+    const battleDate = battleDates.get(log.battle_id);
+    if (battleDate && !Number.isNaN(battleDate.getTime())) {
+      return battleDate;
+    }
+
+    const createdAt = new Date(log.created_at);
+    if (!Number.isNaN(createdAt.getTime())) {
+      return createdAt;
+    }
+
+    return null;
+  };
+
   useEffect(() => {
     const load = async () => {
       const [{ data: statData }, { data: battleData }] = await Promise.all([
         supabase
           .from('battle_stat_logs')
-          .select('id, battle_id, participant_name, unit, kills, deaths, assists'),
+          .select('id, battle_id, participant_name, unit, kills, deaths, assists, created_at'),
         supabase.from('battles').select('id, start_date')
       ]);
 
@@ -71,17 +86,11 @@ export default function LeaderboardPage() {
     };
   }, []);
 
-  const aggregate = (period: 'weekly' | 'monthly') => {
-    const now = new Date();
-    const weeklyCutoff = new Date(now);
-    weeklyCutoff.setDate(now.getDate() - 7);
-    const monthlyCutoff = new Date(now.getFullYear(), now.getMonth(), 1);
-    const cutoff = period === 'weekly' ? weeklyCutoff : monthlyCutoff;
-
+  const aggregateByCutoff = (cutoff: Date | null) => {
     const map = new Map<string, LeaderEntry>();
     logs.forEach((log) => {
-      const date = battleDates.get(log.battle_id);
-      if (!date || date < cutoff) {
+      const date = resolveLogDate(log);
+      if (!date || (cutoff && date < cutoff)) {
         return;
       }
 
@@ -103,6 +112,21 @@ export default function LeaderboardPage() {
     });
 
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
+  };
+
+  const aggregate = (period: 'weekly' | 'monthly') => {
+    const now = new Date();
+    const weeklyCutoff = new Date(now);
+    weeklyCutoff.setDate(now.getDate() - 7);
+    const monthlyCutoff = new Date(now.getFullYear(), now.getMonth(), 1);
+    const cutoff = period === 'weekly' ? weeklyCutoff : monthlyCutoff;
+
+    const filtered = aggregateByCutoff(cutoff);
+    if (filtered.length > 0 || logs.length === 0) {
+      return filtered;
+    }
+
+    return aggregateByCutoff(null);
   };
 
   const weekly = useMemo(() => aggregate('weekly'), [logs, battleDates]);
