@@ -3,6 +3,8 @@ import { Shield } from 'lucide-react';
 import { getAuthenticatedState } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 
+const GROUP_ID = '5531725';
+
 type HeaderProfile = {
   discordUsername: string;
   robloxUsername: string | null;
@@ -10,6 +12,12 @@ type HeaderProfile = {
   callsign: string | null;
   rank: string | null;
   company: string | null;
+  groupRank: string | null;
+};
+
+type RosterRecord = {
+  rank: string;
+  company?: string | null;
 };
 
 type BattleStatLog = {
@@ -68,6 +76,28 @@ async function resolveRobloxId(robloxId?: string | null, robloxUsername?: string
   }
 }
 
+async function resolveGroupRank(robloxId?: string | null, robloxUsername?: string | null, fallbackRank = 'Unranked') {
+  const resolvedId = await resolveRobloxId(robloxId, robloxUsername);
+  if (!resolvedId) {
+    return fallbackRank;
+  }
+
+  try {
+    const response = await fetch(`https://groups.roblox.com/v1/users/${encodeURIComponent(resolvedId)}/groups/roles`);
+    if (!response.ok) {
+      return fallbackRank;
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    const groupRole = Array.isArray(payload?.data)
+      ? payload.data.find((entry: any) => String(entry?.group?.id) === GROUP_ID)
+      : null;
+    return groupRole?.role?.name ? String(groupRole.role.name) : fallbackRank;
+  } catch {
+    return fallbackRank;
+  }
+}
+
 async function loadAvatarUrl(robloxId?: string | null, robloxUsername?: string | null) {
   const resolvedId = await resolveRobloxId(robloxId, robloxUsername);
   if (!resolvedId) {
@@ -114,13 +144,26 @@ export default function ProfilePage() {
           return;
         }
 
+        const { data: rosterRow } = await supabase
+          .from('roster')
+          .select('rank, company')
+          .eq('profile_id', authProfile.id)
+          .maybeSingle();
+
+        const resolvedGroupRank = await resolveGroupRank(
+          authProfile.roblox_id || null,
+          authProfile.roblox_username || null,
+          (rosterRow as RosterRecord | null)?.rank || authProfile.rank || 'Unranked'
+        );
+
         const currentProfile = {
           discordUsername: authProfile.discord_username || session.user.email || 'signed-in-user',
           robloxUsername: authProfile.roblox_username || null,
           robloxId: authProfile.roblox_id || null,
           callsign: authProfile.callsign || null,
-          rank: authProfile.rank || null,
-          company: authProfile.company || null
+          rank: (rosterRow as RosterRecord | null)?.rank || authProfile.rank || null,
+          company: (rosterRow as RosterRecord | null)?.company || authProfile.company || null,
+          groupRank: resolvedGroupRank
         };
 
         const aliases = [authProfile.roblox_username, authProfile.discord_username, authProfile.callsign]
@@ -229,7 +272,7 @@ export default function ProfilePage() {
                   )}
                 </div>
                 <div className="mt-4 text-xl font-semibold uppercase tracking-[0.2em] text-silver">{profile?.robloxUsername || profile?.discordUsername || 'Member'}</div>
-                <div className="mt-2 text-sm text-slate-300">{profile?.rank || 'Unranked'}{profile?.company ? ` • ${profile.company}` : ''}</div>
+                <div className="mt-2 text-sm text-slate-300">{profile?.groupRank || profile?.rank || 'Unranked'}{profile?.company ? ` • ${profile.company}` : ''}</div>
                 {profile?.callsign && <div className="mt-1 text-xs uppercase tracking-[0.3em] text-slate-400">{profile.callsign}</div>}
               </div>
             </div>

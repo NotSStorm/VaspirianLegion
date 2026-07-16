@@ -34,6 +34,12 @@ const REQUIRED_STRUCTURE = [
   }
 ];
 
+const TIER_ORDER: Record<string, number> = {
+  'Grand Battery Command': 0,
+  '82nd Pirkland': 1,
+  '87th Melrose': 2
+};
+
 function normalizeSlotTitle(title: string) {
   if (title === 'Security Slot') return 'Komendant des Flag';
   if (title === 'Gun Team I') return 'Gun Team Lead I';
@@ -92,10 +98,16 @@ export default function CommandPage() {
       const existing = grouped.get(key) || [];
       grouped.set(key, [...existing, slot]);
     });
-    return Array.from(grouped.entries()).map(([title, entries]) => ({
-      title,
-      slots: entries.sort((a, b) => a.sort_order - b.sort_order)
-    }));
+    return Array.from(grouped.entries())
+      .map(([title, entries]) => ({
+        title,
+        slots: entries.sort((a, b) => a.sort_order - b.sort_order)
+      }))
+      .sort((a, b) => {
+        const left = TIER_ORDER[a.title] ?? Number.MAX_SAFE_INTEGER;
+        const right = TIER_ORDER[b.title] ?? Number.MAX_SAFE_INTEGER;
+        return left - right;
+      });
   }, [slots]);
 
   const updateSlot = async (slot: Slot, patch: Partial<Slot>) => {

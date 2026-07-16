@@ -318,6 +318,39 @@ export default function BattlesPage() {
             >
               View Logs
             </button>
+            {selectedBattleId === battle.id && (
+              <div className="mt-3 rounded border border-slateBlue/60 bg-[#0d121b] p-4">
+                <div className="mb-3 text-[10px] uppercase tracking-[0.3em] text-slate-400">Battle Log Sheet</div>
+                {selectedLogs.length === 0 ? (
+                  <p className="text-sm text-slate-400">No logs recorded for this battle yet.</p>
+                ) : (
+                  <div className="overflow-auto rounded border border-slateBlue/50">
+                    <table className="min-w-full text-left text-sm">
+                      <thead className="bg-slateBlue/30 text-slate-200">
+                        <tr>
+                          <th className="px-3 py-2">Name</th>
+                          <th className="px-3 py-2">K</th>
+                          <th className="px-3 py-2">D</th>
+                          <th className="px-3 py-2">A</th>
+                          <th className="px-3 py-2">Unit</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedLogs.map((entry) => (
+                          <tr key={entry.id} className="border-t border-slateBlue/40">
+                            <td className="px-3 py-2 font-semibold text-silver">{entry.participant_name}</td>
+                            <td className="px-3 py-2 text-slate-300">{entry.kills}</td>
+                            <td className="px-3 py-2 text-slate-300">{entry.deaths}</td>
+                            <td className="px-3 py-2 text-slate-300">{entry.assists}</td>
+                            <td className="px-3 py-2 text-slate-300">{entry.unit}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
             {isStaff && (
               <div className="mt-2 flex gap-2">
                 <button

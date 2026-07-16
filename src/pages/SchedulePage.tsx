@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import BattleCard from '../components/shared/BattleCard';
 import { getAuthenticatedState } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 
@@ -16,19 +15,52 @@ type ScheduleEvent = {
   notes?: string | null;
 };
 
+const CLASSIFICATION_OPTIONS = ['Infantry', 'Arty', 'Skirms', 'Cav'] as const;
+
+function parseEventDate(value: string) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatEventDate(value: string) {
+  const parsed = parseEventDate(value);
+  if (!parsed) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  }).format(parsed);
+}
+
+function formatEventTime(value: string) {
+  const parsed = parseEventDate(value);
+  if (!parsed) {
+    return { time: 'N/A', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone };
+  }
+
+  return {
+    time: new Intl.DateTimeFormat(undefined, {
+      hour: 'numeric',
+      minute: '2-digit'
+    }).format(parsed),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+  };
+}
+
 export default function SchedulePage() {
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [isStaff, setIsStaff] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: '',
-    classification: 'Public',
-    status: 'Pending',
-    theater: '',
+    classification: 'Infantry',
     commandingOfficer: '',
     personnelCount: 0,
     startDate: '',
-    threatLevel: 1,
+    rallyTime: '',
     notes: ''
   });
 
@@ -41,10 +73,15 @@ export default function SchedulePage() {
       const { data, error: loadError } = await supabase
         .from('schedule_events')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('start_date', { ascending: true });
 
       if (loadError) throw loadError;
-      setEvents((data || []) as ScheduleEvent[]);
+      const now = new Date();
+      const upcomingOnly = ((data || []) as ScheduleEvent[]).filter((event) => {
+        const parsed = parseEventDate(event.start_date);
+        return !parsed || parsed >= now;
+      });
+      setEvents(upcomingOnly);
     } catch (loadErr) {
       setError(loadErr instanceof Error ? loadErr.message : 'Unable to load schedule.');
       setEvents([]);
@@ -58,15 +95,24 @@ export default function SchedulePage() {
   const createEvent = async () => {
     setError(null);
     try {
+      const combinedDateTime = form.startDate && form.rallyTime
+        ? new Date(`${form.startDate}T${form.rallyTime}`)
+        : null;
+
+      if (!combinedDateTime || Number.isNaN(combinedDateTime.getTime())) {
+        setError('Please provide a valid date and rally time.');
+        return;
+      }
+
       const { error: insertError } = await supabase.from('schedule_events').insert({
         name: form.name,
         classification: form.classification,
-        status: form.status,
-        theater: form.theater,
+        status: 'Scheduled',
+        theater: 'N/A',
         commanding_officer: form.commandingOfficer,
         personnel_count: Number(form.personnelCount) || 0,
-        start_date: form.startDate,
-        threat_level: Math.max(1, Math.min(5, Number(form.threatLevel) || 1)),
+        start_date: combinedDateTime.toISOString(),
+        threat_level: 0,
         notes: form.notes || null
       });
 
@@ -74,13 +120,11 @@ export default function SchedulePage() {
 
       setForm({
         name: '',
-        classification: 'Public',
-        status: 'Pending',
-        theater: '',
+        classification: 'Infantry',
         commandingOfficer: '',
         personnelCount: 0,
         startDate: '',
-        threatLevel: 1,
+        rallyTime: '',
         notes: ''
       });
       await loadSchedule();
@@ -97,40 +141,39 @@ export default function SchedulePage() {
         {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        {events.map((item) => (
-          <BattleCard
-            key={item.id}
-            name={item.name}
-            classification={item.classification}
-            status={item.status}
-            theater={item.theater}
-            commandingOfficer={item.commanding_officer}
-            personnelCount={item.personnel_count}
-            date={item.start_date}
-            threatLevel={item.threat_level}
-          />
-        ))}
+        {events.map((item) => {
+          const timeInfo = formatEventTime(item.start_date);
+          return (
+            <div key={item.id} className="rounded border border-slateBlue/60 bg-[#141a24] p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-lg font-semibold text-silver">{item.name}</div>
+                <span className="rounded border border-slateBlue/60 px-2 py-1 text-xs uppercase tracking-[0.3em] text-slate-300">{item.classification}</span>
+              </div>
+              <div className="mt-4 grid gap-3 text-sm text-slate-300 sm:grid-cols-2">
+                <div><span className="text-slate-400">CO</span><div className="font-semibold text-silver">{item.commanding_officer}</div></div>
+                <div><span className="text-slate-400">Personnel</span><div className="font-semibold text-silver">{item.personnel_count}</div></div>
+                <div><span className="text-slate-400">Date</span><div className="font-semibold text-silver">{formatEventDate(item.start_date)}</div></div>
+                <div><span className="text-slate-400">Rally Time</span><div className="font-semibold text-silver">{timeInfo.time} <span className="text-slate-400">({timeInfo.timezone})</span></div></div>
+              </div>
+              {item.notes && <div className="mt-4 text-sm text-slate-300">{item.notes}</div>}
+            </div>
+          );
+        })}
       </div>
 
       {isStaff && (
         <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
           <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">Add Schedule Event</h3>
-          <p className="mt-2 text-sm text-slate-300">Use this format: day/region classification, rally time, CO, and notes/link in the note field.</p>
+          <p className="mt-2 text-sm text-slate-300">Set the event type, rally date, rally time, CO, and any notes or event link.</p>
           <div className="mt-4 grid gap-3">
             <label className="text-xs text-slate-400">Event Title
               <input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="Event title" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="text-xs text-slate-400">Classification
-                <input value={form.classification} onChange={(event) => setForm((prev) => ({ ...prev, classification: event.target.value }))} placeholder="Classification" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
-              </label>
-              <label className="text-xs text-slate-400">Status
-                <input value={form.status} onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value }))} placeholder="Status" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
-              </label>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="text-xs text-slate-400">Theater / Region
-                <input value={form.theater} onChange={(event) => setForm((prev) => ({ ...prev, theater: event.target.value }))} placeholder="Theater" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+                <select value={form.classification} onChange={(event) => setForm((prev) => ({ ...prev, classification: event.target.value }))} className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver">
+                  {CLASSIFICATION_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                </select>
               </label>
               <label className="text-xs text-slate-400">CO
                 <input value={form.commandingOfficer} onChange={(event) => setForm((prev) => ({ ...prev, commandingOfficer: event.target.value }))} placeholder="CO" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
@@ -140,11 +183,11 @@ export default function SchedulePage() {
               <label className="text-xs text-slate-400">Personnel
                 <input type="number" value={form.personnelCount} onChange={(event) => setForm((prev) => ({ ...prev, personnelCount: Number(event.target.value) }))} placeholder="Personnel" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
               </label>
-              <label className="text-xs text-slate-400">Date / Rally Time
-                <input value={form.startDate} onChange={(event) => setForm((prev) => ({ ...prev, startDate: event.target.value }))} placeholder="Date / Rally time" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+              <label className="text-xs text-slate-400">Date
+                <input type="date" value={form.startDate} onChange={(event) => setForm((prev) => ({ ...prev, startDate: event.target.value }))} className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
               </label>
-              <label className="text-xs text-slate-400">Performance (1-5)
-                <input type="number" min={1} max={5} value={form.threatLevel} onChange={(event) => setForm((prev) => ({ ...prev, threatLevel: Number(event.target.value) }))} placeholder="Performance" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+              <label className="text-xs text-slate-400">Rally Time
+                <input type="time" value={form.rallyTime} onChange={(event) => setForm((prev) => ({ ...prev, rallyTime: event.target.value }))} className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
               </label>
             </div>
             <label className="text-xs text-slate-400">Notes / Event Link

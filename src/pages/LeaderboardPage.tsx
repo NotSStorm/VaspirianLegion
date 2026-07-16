@@ -20,15 +20,17 @@ type StatLog = {
 type LeaderEntry = {
   name: string;
   unit: string;
-  total: number;
   kills: number;
   deaths: number;
   assists: number;
 };
 
+type Metric = 'kills' | 'deaths' | 'assists';
+
 export default function LeaderboardPage() {
   const [logs, setLogs] = useState<StatLog[]>([]);
   const [battleDates, setBattleDates] = useState<Map<string, Date>>(new Map());
+  const [metric, setMetric] = useState<Metric>('kills');
 
   const resolveLogDate = (log: StatLog) => {
     const battleDate = battleDates.get(log.battle_id);
@@ -98,7 +100,6 @@ export default function LeaderboardPage() {
       const existing = map.get(key) || {
         name: log.participant_name,
         unit: log.unit,
-        total: 0,
         kills: 0,
         deaths: 0,
         assists: 0
@@ -107,11 +108,10 @@ export default function LeaderboardPage() {
       existing.kills += Number(log.kills) || 0;
       existing.deaths += Number(log.deaths) || 0;
       existing.assists += Number(log.assists) || 0;
-      existing.total = existing.kills + existing.assists;
       map.set(key, existing);
     });
 
-    return Array.from(map.values()).sort((a, b) => b.total - a.total);
+    return Array.from(map.values());
   };
 
   const aggregate = (period: 'weekly' | 'monthly') => {
@@ -132,16 +132,22 @@ export default function LeaderboardPage() {
   const weekly = useMemo(() => aggregate('weekly'), [logs, battleDates]);
   const monthly = useMemo(() => aggregate('monthly'), [logs, battleDates]);
 
+  const rankBoard = (board: LeaderEntry[]) => (
+    [...board]
+      .sort((a, b) => (Number(b[metric]) || 0) - (Number(a[metric]) || 0))
+      .slice(0, 50)
+  );
+
   const renderBoard = (title: string, board: LeaderEntry[]) => (
     <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
       <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">{title}</h3>
       <div className="mt-4 space-y-2">
-        {board.length === 0 ? (
+        {rankBoard(board).length === 0 ? (
           <p className="text-sm text-slate-400">No data logged yet.</p>
-        ) : board.map((entry, index) => (
+        ) : rankBoard(board).map((entry, index) => (
           <div key={`${entry.name}-${entry.unit}`} className="flex items-center justify-between rounded border border-slateBlue/60 px-3 py-2 text-sm">
             <div className="text-slate-300">{index + 1}. {entry.name} <span className="text-slate-500">({entry.unit})</span></div>
-            <div className="text-silver">Total {entry.total} | K {entry.kills} D {entry.deaths} A {entry.assists}</div>
+            <div className="text-silver">{metric.toUpperCase()} {entry[metric]}</div>
           </div>
         ))}
       </div>
@@ -153,10 +159,15 @@ export default function LeaderboardPage() {
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
         <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Performance</div>
         <h2 className="mt-2 text-3xl font-semibold uppercase tracking-[0.2em] text-silver">Leaderboard</h2>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button type="button" onClick={() => setMetric('kills')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${metric === 'kills' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Kills</button>
+          <button type="button" onClick={() => setMetric('deaths')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${metric === 'deaths' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Deaths</button>
+          <button type="button" onClick={() => setMetric('assists')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${metric === 'assists' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Assists</button>
+        </div>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        {renderBoard('Weekly Leaders', weekly)}
-        {renderBoard('Monthly Leaders', monthly)}
+        {renderBoard(`Weekly ${metric[0].toUpperCase()}${metric.slice(1)}`, weekly)}
+        {renderBoard(`Monthly ${metric[0].toUpperCase()}${metric.slice(1)}`, monthly)}
       </div>
     </section>
   );
