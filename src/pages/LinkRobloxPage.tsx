@@ -8,6 +8,18 @@ function randomCode() {
   return `LEGION-${Math.floor(Math.random() * 0x1000000).toString(16).toUpperCase()}`;
 }
 
+function errorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === 'object' && 'message' in error && typeof (error as { message?: unknown }).message === 'string') {
+    return (error as { message: string }).message;
+  }
+
+  return fallback;
+}
+
 export default function LinkRobloxPage() {
   const navigate = useNavigate();
   const [username, setUsername] = useState('');
@@ -91,7 +103,8 @@ export default function LinkRobloxPage() {
       setVerificationCode(nextCode);
       setSuccess('A fresh verification code has been saved to your profile.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to generate a verification code.');
+      console.error('Roblox verification code generation failed', err);
+      setError(errorMessage(err, 'Unable to generate a verification code.'));
     } finally {
       setGeneratingCode(false);
     }
@@ -141,7 +154,8 @@ export default function LinkRobloxPage() {
       const nextPath = await resolvePostAuthPath();
       navigate(nextPath, { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Verification failed.');
+      console.error('Roblox verification confirmation failed', err);
+      setError(errorMessage(err, 'Verification failed.'));
     } finally {
       setConfirmingCode(false);
     }
