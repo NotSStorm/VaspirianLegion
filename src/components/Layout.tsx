@@ -29,6 +29,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [headerUser, setHeaderUser] = useState<HeaderUser | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarLoading, setAvatarLoading] = useState(false);
 
   const roleLabel = useMemo(() => {
     if (!headerUser) return null;
@@ -77,50 +78,36 @@ export default function Layout({ children }: { children: ReactNode }) {
     let active = true;
 
     const loadAvatar = async () => {
-      let resolvedRobloxId = headerUser?.robloxId || null;
-
-      if (!resolvedRobloxId && headerUser?.robloxUsername) {
-        try {
-          const lookupResponse = await fetch('https://users.roblox.com/v1/usernames/users', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ usernames: [headerUser.robloxUsername], excludeBannedUsers: false })
-          });
-
-          if (lookupResponse.ok) {
-            const payload = await lookupResponse.json().catch(() => ({}));
-            const first = Array.isArray(payload?.data) ? payload.data[0] : null;
-            if (first?.id) {
-              resolvedRobloxId = String(first.id);
-            }
-          }
-        } catch {
-          resolvedRobloxId = null;
-        }
-      }
-
-      if (!resolvedRobloxId) {
+      if (!headerUser?.robloxId && !headerUser?.robloxUsername) {
         setAvatarUrl(null);
         return;
       }
 
       try {
-        const response = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${encodeURIComponent(resolvedRobloxId)}&size=150x150&format=Png&isCircular=true`);
+        setAvatarLoading(true);
+        const response = await fetch('/api/roblox/avatar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ robloxId: headerUser.robloxId, robloxUsername: headerUser.robloxUsername })
+        });
         if (!response.ok) {
           setAvatarUrl(null);
           return;
         }
 
         const payload = await response.json().catch(() => ({}));
-        const first = Array.isArray(payload?.data) ? payload.data[0] : null;
-        if (!active || !first?.imageUrl) {
+        if (!active || !payload?.imageUrl) {
           setAvatarUrl(null);
           return;
         }
 
-        setAvatarUrl(first.imageUrl);
+        setAvatarUrl(String(payload.imageUrl));
       } catch {
         setAvatarUrl(null);
+      } finally {
+        if (active) {
+          setAvatarLoading(false);
+        }
       }
     };
 
@@ -161,7 +148,9 @@ export default function Layout({ children }: { children: ReactNode }) {
             {headerUser && (
               <NavLink to="/profile" className="flex items-center gap-3 rounded border border-slateBlue/60 bg-[#141a24] px-3 py-2 transition hover:border-silver/40 hover:bg-[#18202c]">
                 <div className="h-10 w-10 overflow-hidden rounded-full border border-slateBlue/60 bg-[#0d121b]">
-                  {avatarUrl ? (
+                  {avatarLoading ? (
+                    <div className="h-full w-full animate-pulse bg-slateBlue/30" />
+                  ) : avatarUrl ? (
                     <img src={avatarUrl} alt="Roblox avatar" className="h-full w-full object-cover" />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">N/A</div>

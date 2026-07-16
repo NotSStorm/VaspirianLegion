@@ -134,12 +134,18 @@ export default function RallyTrackerPage() {
     if (points.length === 0) return '';
     return points
       .map((point, index) => {
-        const x = (index / Math.max(points.length - 1, 1)) * 100;
-        const y = 100 - (selector(point) / maxY) * 100;
+        const x = points.length === 1 ? 50 : 8 + (index / Math.max(points.length - 1, 1)) * 84;
+        const y = 90 - (selector(point) / maxY) * 72;
         return `${x},${y}`;
       })
       .join(' ');
   };
+
+  const pointCoordinates = (selector: (point: TrendPoint) => number) => points.map((point, index) => ({
+    x: points.length === 1 ? 50 : 8 + (index / Math.max(points.length - 1, 1)) * 84,
+    y: 90 - (selector(point) / maxY) * 72,
+    value: selector(point)
+  }));
 
   return (
     <section className="space-y-6">
@@ -157,11 +163,37 @@ export default function RallyTrackerPage() {
           <p className="text-sm text-slate-400">No battle attendance logs in this period.</p>
         ) : (
           <>
-            <div className="mb-3 text-xs uppercase tracking-[0.3em] text-slate-400">Attendance Lines: Melrose, Pirkland, Total</div>
-            <svg viewBox="0 0 100 100" className="h-48 w-full rounded border border-slateBlue/60 bg-[#0d121b] p-2">
-              <polyline fill="none" stroke="#34d399" strokeWidth="1.5" points={toPolyline((point) => point.melrose)} />
-              <polyline fill="none" stroke="#60a5fa" strokeWidth="1.5" points={toPolyline((point) => point.pirkland)} />
-              <polyline fill="none" stroke="#fbbf24" strokeWidth="1.5" points={toPolyline((point) => point.total)} />
+            <div className="mb-3 flex flex-wrap gap-4 text-xs uppercase tracking-[0.3em] text-slate-300">
+              <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-white" /> Total</span>
+              <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-blue-400" /> Pirkland</span>
+              <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-fuchsia-400" /> Melrose</span>
+            </div>
+            <svg viewBox="0 0 100 100" className="h-64 w-full rounded border border-slateBlue/60 bg-[#0d121b] p-2">
+              {[0, 25, 50, 75, 100].map((_, index) => (
+                <line key={index} x1="4" y1={10 + index * 20} x2="96" y2={10 + index * 20} stroke="rgba(148, 163, 184, 0.18)" strokeWidth="0.5" />
+              ))}
+              <polyline fill="none" stroke="#ffffff" strokeWidth="1.7" strokeDasharray="1.5 1.2" points={toPolyline((point) => point.total)} />
+              <polyline fill="none" stroke="#60a5fa" strokeWidth="1.7" points={toPolyline((point) => point.pirkland)} />
+              <polyline fill="none" stroke="#d946ef" strokeWidth="1.7" points={toPolyline((point) => point.melrose)} />
+
+              {pointCoordinates((point) => point.total).map((point, index) => (
+                <g key={`total-${index}`}>
+                  <circle cx={point.x} cy={point.y} r="1.3" fill="#ffffff" />
+                  <text x={point.x} y={point.y - 3} textAnchor="middle" fontSize="4" fill="#ffffff">{point.value}</text>
+                </g>
+              ))}
+              {pointCoordinates((point) => point.pirkland).map((point, index) => (
+                <g key={`pirkland-${index}`}>
+                  <circle cx={point.x} cy={point.y} r="1.2" fill="#60a5fa" />
+                  <text x={point.x} y={point.y - 3} textAnchor="middle" fontSize="3.6" fill="#60a5fa">{point.value}</text>
+                </g>
+              ))}
+              {pointCoordinates((point) => point.melrose).map((point, index) => (
+                <g key={`melrose-${index}`}>
+                  <circle cx={point.x} cy={point.y} r="1.2" fill="#d946ef" />
+                  <text x={point.x} y={point.y - 3} textAnchor="middle" fontSize="3.6" fill="#d946ef">{point.value}</text>
+                </g>
+              ))}
             </svg>
 
             <div className="mt-4 overflow-auto rounded border border-slateBlue/60">

@@ -99,30 +99,31 @@ async function resolveGroupRank(robloxId?: string | null, robloxUsername?: strin
 }
 
 async function loadAvatarUrl(robloxId?: string | null, robloxUsername?: string | null) {
-  const resolvedId = await resolveRobloxId(robloxId, robloxUsername);
-  if (!resolvedId) {
-    return null;
-  }
-
   try {
-    const response = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${encodeURIComponent(resolvedId)}&size=150x150&format=Png&isCircular=true`);
+    const response = await fetch('/api/roblox/avatar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ robloxId, robloxUsername })
+    });
+    const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      return `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(resolvedId)}&width=150&height=150&format=png`;
+      return { resolvedId: payload?.robloxId ? String(payload.robloxId) : null, imageUrl: null };
     }
 
-    const payload = await response.json().catch(() => ({}));
-    const first = Array.isArray(payload?.data) ? payload.data[0] : null;
-    return first?.imageUrl
-      ? String(first.imageUrl)
-      : `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(resolvedId)}&width=150&height=150&format=png`;
+    return {
+      resolvedId: payload?.robloxId ? String(payload.robloxId) : null,
+      imageUrl: payload?.imageUrl ? String(payload.imageUrl) : null
+    };
   } catch {
-    return `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(resolvedId)}&width=150&height=150&format=png`;
+    return { resolvedId: null, imageUrl: null };
   }
 }
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<HeaderProfile | null>(null);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarCandidates, setAvatarCandidates] = useState<string[]>([]);
+  const [avatarIndex, setAvatarIndex] = useState(0);
+  const [avatarLoading, setAvatarLoading] = useState(false);
   const [logs, setLogs] = useState<BattleStatLog[]>([]);
   const [battlesById, setBattlesById] = useState<Map<string, Battle>>(new Map());
   const [error, setError] = useState<string | null>(null);
@@ -183,7 +184,13 @@ export default function ProfilePage() {
         const filteredLogs = ((statData || []) as BattleStatLog[]).filter((entry) => aliases.includes(normalizeName(entry.participant_name)));
         const battleMap = new Map<string, Battle>();
         ((battleData || []) as Battle[]).forEach((battle) => battleMap.set(battle.id, battle));
-        const resolvedAvatarUrl = await loadAvatarUrl(currentProfile.robloxId, currentProfile.robloxUsername);
+        setAvatarLoading(true);
+        const avatarResult = await loadAvatarUrl(currentProfile.robloxId, currentProfile.robloxUsername);
+        const candidates = [
+          avatarResult.imageUrl,
+          avatarResult.resolvedId ? `https://www.roblox.com/avatar-thumbnail/image?userId=${encodeURIComponent(avatarResult.resolvedId)}&width=420&height=420&format=png` : null,
+          avatarResult.resolvedId ? `https://www.roblox.com/headshot-thumbnail/image?userId=${encodeURIComponent(avatarResult.resolvedId)}&width=420&height=420&format=png` : null
+        ].filter((value): value is string => Boolean(value));
 
         if (!active) {
           return;
@@ -192,7 +199,8 @@ export default function ProfilePage() {
         setProfile(currentProfile);
         setLogs(filteredLogs);
         setBattlesById(battleMap);
-        setAvatarUrl(resolvedAvatarUrl);
+        setAvatarCandidates(candidates);
+        setAvatarIndex(0);
       } catch (loadErr) {
         if (!active) {
           return;
@@ -200,6 +208,7 @@ export default function ProfilePage() {
         setError(loadErr instanceof Error ? loadErr.message : 'Unable to load profile.');
       } finally {
         if (active) {
+          setAvatarLoading(false);
           setLoading(false);
         }
       }
@@ -267,8 +276,16 @@ export default function ProfilePage() {
             <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
               <div className="flex flex-col items-center text-center">
                 <div className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border border-slateBlue/60 bg-[#0d121b]">
-                  {avatarUrl ? (
-                    <img src={avatarUrl} alt="Roblox avatar" className="h-full w-full object-cover" />
+                  {avatarLoading ? (
+                    <div className="h-full w-full animate-pulse bg-slateBlue/30" />
+                  ) : avatarCandidates[avatarIndex] ? (
+                    <img
+                      src={avatarCandidates[avatarIndex]}
+                      alt="Roblox avatar"
+                      className="h-full w-full object-cover"
+                      referrerPolicy="no-referrer"
+                      onError={() => setAvatarIndex((current) => current + 1)}
+                    />
                   ) : (
                     <Shield className="h-12 w-12 text-slate-400" />
                   )}

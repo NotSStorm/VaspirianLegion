@@ -146,6 +146,44 @@ async function verifyRobloxGroupRole(username: string, groupUrl: string, env: an
   }
 }
 
+async function resolveRobloxUserId(input: { robloxId?: string | number | null; robloxUsername?: string | null }) {
+  if (input.robloxId) {
+    return String(input.robloxId);
+  }
+
+  const username = String(input.robloxUsername || '').trim();
+  if (!username) {
+    return null;
+  }
+
+  const result = await verifyRobloxUsername(username);
+  return result.verified && result.robloxId ? String(result.robloxId) : null;
+}
+
+async function fetchRobloxAvatarImageUrl(input: { robloxId?: string | number | null; robloxUsername?: string | null }) {
+  const resolvedId = await resolveRobloxUserId(input);
+  if (!resolvedId) {
+    return { ok: false, status: 400, message: 'Missing Roblox identity.', imageUrl: null, robloxId: null };
+  }
+
+  try {
+    const response = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${encodeURIComponent(resolvedId)}&size=150x150&format=Png&isCircular=true`);
+    if (!response.ok) {
+      return { ok: false, status: response.status, message: 'Unable to fetch Roblox avatar.', imageUrl: null, robloxId: resolvedId };
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    const first = Array.isArray(payload?.data) ? payload.data[0] : null;
+    if (!first?.imageUrl) {
+      return { ok: false, status: 502, message: 'Roblox avatar not available.', imageUrl: null, robloxId: resolvedId };
+    }
+
+    return { ok: true, status: 200, message: 'Avatar resolved.', imageUrl: String(first.imageUrl), robloxId: resolvedId };
+  } catch {
+    return { ok: false, status: 500, message: 'Unable to reach Roblox thumbnail API.', imageUrl: null, robloxId: resolvedId };
+  }
+}
+
 // Worker that serves static assets from the built-in assets binding and falls back to index.html for SPA routes
 export default {
   async fetch(request: Request, env: any) {
@@ -186,6 +224,23 @@ export default {
         return jsonResponse(result);
       } catch {
         return jsonResponse({ verified: false, checked: true, message: 'Verification pending' }, 500);
+      }
+    }
+
+    if (url.pathname === '/api/roblox/avatar' && request.method === 'POST') {
+      if (!(await enforceRateLimit(request, env, 20, 60_000))) {
+        return jsonResponse({ imageUrl: null, message: 'Too many avatar requests. Please try again shortly.' }, 429);
+      }
+
+      try {
+        const body = await request.json().catch(() => ({}));
+        const result = await fetchRobloxAvatarImageUrl({
+          robloxId: body.robloxId,
+          robloxUsername: body.robloxUsername || body.username
+        });
+        return jsonResponse({ imageUrl: result.imageUrl, robloxId: result.robloxId, message: result.message }, result.status);
+      } catch {
+        return jsonResponse({ imageUrl: null, robloxId: null, message: 'Unable to fetch Roblox avatar.' }, 500);
       }
     }
 
