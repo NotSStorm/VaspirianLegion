@@ -51,6 +51,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       if (!active || !session?.user || !profile) {
         setHeaderUser(null);
         setAvatarUrl(null);
+        setAvatarLoading(false);
         return;
       }
 
@@ -80,6 +81,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     const loadAvatar = async () => {
       if (!headerUser?.robloxId && !headerUser?.robloxUsername) {
         setAvatarUrl(null);
+        setAvatarLoading(false);
         return;
       }
 
@@ -151,7 +153,11 @@ export default function Layout({ children }: { children: ReactNode }) {
                   {avatarLoading ? (
                     <div className="h-full w-full animate-pulse bg-slateBlue/30" />
                   ) : avatarUrl ? (
-                    <img src={avatarUrl} alt="Roblox avatar" className="h-full w-full object-cover" />
+                    <img
+                      src={avatarUrl}
+                      alt="Roblox avatar"
+                      className="h-full w-full object-cover"
+                    />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">N/A</div>
                   )}

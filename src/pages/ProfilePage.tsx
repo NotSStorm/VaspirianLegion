@@ -283,7 +283,7 @@ export default function ProfilePage() {
                       src={avatarCandidates[avatarIndex]}
                       alt="Roblox avatar"
                       className="h-full w-full object-cover"
-                      referrerPolicy="no-referrer"
+                      onLoad={() => setAvatarLoading(false)}
                       onError={() => setAvatarIndex((current) => current + 1)}
                     />
                   ) : (
