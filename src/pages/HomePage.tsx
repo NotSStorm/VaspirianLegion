@@ -1,14 +1,69 @@
+import { useEffect, useState } from 'react';
 import { ArrowRight, Shield } from 'lucide-react';
 import StatCard from '../components/shared/StatCard';
+import { supabase } from '../lib/supabase';
 
-const stats = [
-  { label: 'Active Personnel', value: '128' },
-  { label: 'Ongoing Battles', value: '4' },
-  { label: 'Upcoming Engagements', value: '6' },
-  { label: 'Battery Strength %', value: '87%' }
-];
+type BattleLite = {
+  id: string;
+  status: string;
+  start_date: string;
+};
 
 export default function HomePage() {
+  const [activePersonnel, setActivePersonnel] = useState(0);
+  const [battlesCompleted, setBattlesCompleted] = useState(0);
+  const [upcomingEngagements, setUpcomingEngagements] = useState(0);
+
+  useEffect(() => {
+    const load = async () => {
+      const [{ count: rosterCount }, { data: battleData }] = await Promise.all([
+        supabase.from('roster').select('*', { count: 'exact', head: true }),
+        supabase.from('battles').select('id, status, start_date')
+      ]);
+
+      const battles = (battleData || []) as BattleLite[];
+      const now = new Date();
+      const completed = battles.length;
+      const upcoming = battles.filter((battle) => {
+        const status = String(battle.status || '');
+        if (/upcoming|pending|planned|scheduled/i.test(status)) return true;
+        const parsed = new Date(battle.start_date);
+        return !Number.isNaN(parsed.getTime()) && parsed > now;
+      }).length;
+
+      setActivePersonnel(rosterCount || 0);
+      setBattlesCompleted(completed);
+      setUpcomingEngagements(upcoming);
+    };
+
+    void load();
+
+    const channel = supabase
+      .channel('home-live-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'roster' }, () => {
+        void load();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'battles' }, () => {
+        void load();
+      })
+      .subscribe();
+
+    const pollId = window.setInterval(() => {
+      void load();
+    }, 20000);
+
+    return () => {
+      window.clearInterval(pollId);
+      void supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const stats = [
+    { label: 'Active Personnel', value: activePersonnel },
+    { label: 'Battles Completed', value: battlesCompleted },
+    { label: 'Upcoming Engagements', value: upcomingEngagements }
+  ];
+
   return (
     <section className="space-y-8">
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-8 shadow-[0_0_30px_rgba(30,58,95,0.2)]">
@@ -37,9 +92,9 @@ export default function HomePage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {stats.map((stat) => (
-          <StatCard key={stat.label} label={stat.label} value={stat.value} accent={stat.label === 'Battery Strength %' ? 'accent' : 'default'} />
+          <StatCard key={stat.label} label={stat.label} value={stat.value} />
         ))}
       </div>
 

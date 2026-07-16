@@ -4,6 +4,67 @@ import { getAuthenticatedState } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 
 const GROUP_ID = '5531725';
+const roleCache = new Map<string, string>();
+const idByUsernameCache = new Map<string, string>();
+
+async function resolveRobloxIdByUsername(username?: string | null) {
+  const normalized = String(username || '').trim();
+  if (!normalized) return null;
+  if (idByUsernameCache.has(normalized)) return idByUsernameCache.get(normalized) as string;
+
+  try {
+    const response = await fetch('https://users.roblox.com/v1/usernames/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usernames: [normalized], excludeBannedUsers: false })
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    const first = Array.isArray(payload?.data) ? payload.data[0] : null;
+    if (!first?.id) {
+      return null;
+    }
+
+    const resolved = String(first.id);
+    idByUsernameCache.set(normalized, resolved);
+    return resolved;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveGroupRank(robloxId?: string | null, robloxUsername?: string | null, fallbackRank = 'Unknown') {
+  let resolvedId = robloxId || null;
+  if (!resolvedId) {
+    resolvedId = await resolveRobloxIdByUsername(robloxUsername);
+  }
+
+  if (!resolvedId) return fallbackRank;
+  if (roleCache.has(resolvedId)) return roleCache.get(resolvedId) as string;
+
+  try {
+    const response = await fetch(`https://groups.roblox.com/v1/users/${encodeURIComponent(resolvedId)}/groups/roles`);
+    if (!response.ok) {
+      roleCache.set(resolvedId, fallbackRank);
+      return fallbackRank;
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    const groupRole = Array.isArray(payload?.data)
+      ? payload.data.find((entry: any) => String(entry?.group?.id) === GROUP_ID)
+      : null;
+    const resolved = groupRole?.role?.name ? String(groupRole.role.name) : fallbackRank;
+    roleCache.set(resolvedId, resolved);
+    return resolved;
+  } catch {
+    roleCache.set(resolvedId, fallbackRank);
+    return fallbackRank;
+  }
+}
 
 type PersonnelRow = {
   combinedName: string;
@@ -31,123 +92,62 @@ export default function PersonnelPage() {
   const [isStaff, setIsStaff] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+  const [syncingRanks, setSyncingRanks] = useState(false);
+
+  const loadPersonnel = async () => {
+    setLoading(true);
+
+    try {
+      const { profile } = await getAuthenticatedState();
+      setIsStaff(profile?.role === 'admin' || profile?.role === 'officer');
+
+      const { data: rosterData, error: rosterError } = await supabase
+        .from('roster')
+        .select('id, profile_id, rank, company, profile:profiles!roster_profile_id_fkey(roblox_username, roblox_id, discord_username)')
+        .order('created_at', { ascending: true });
+
+      if (rosterError) {
+        throw rosterError;
+      }
+
+      const profileIds = (rosterData || []).map((entry: any) => entry.profile_id);
+      const { data: qualificationData } = await supabase
+        .from('roster_qualifications')
+        .select('profile_id, tag')
+        .in('profile_id', profileIds.length ? profileIds : ['00000000-0000-0000-0000-000000000000']);
+
+      const qualificationsByProfile = new Map<string, string[]>();
+      (qualificationData || []).forEach((qualification: any) => {
+        const existing = qualificationsByProfile.get(qualification.profile_id) || [];
+        qualificationsByProfile.set(qualification.profile_id, [...existing, String(qualification.tag)]);
+      });
+
+      const resolvedRows = await Promise.all(
+        ((rosterData || []) as RosterRecord[]).map(async (entry) => {
+          const robloxName = entry.profile?.roblox_username || entry.profile?.discord_username || 'Unknown';
+          const groupRank = await resolveGroupRank(entry.profile?.roblox_id, entry.profile?.roblox_username, entry.rank || 'Unranked');
+
+          return {
+            combinedName: `${groupRank} - ${robloxName}`,
+            unit: entry.company || 'Unassigned',
+            groupRank,
+            tags: qualificationsByProfile.get(entry.profile_id) || []
+          };
+        })
+      );
+
+      setRows(resolvedRows);
+      setRosterRows((rosterData || []) as RosterRecord[]);
+    } catch (error) {
+      console.error('Personnel roster load failed', error);
+      setRows([]);
+      setRosterRows([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const loadPersonnel = async () => {
-      setLoading(true);
-
-      try {
-        const { profile } = await getAuthenticatedState();
-        setIsStaff(profile?.role === 'admin' || profile?.role === 'officer');
-
-        const { data: rosterData, error: rosterError } = await supabase
-          .from('roster')
-          .select('id, profile_id, rank, company, profile:profiles!roster_profile_id_fkey(roblox_username, roblox_id, discord_username)')
-          .order('created_at', { ascending: true });
-
-        if (rosterError) {
-          throw rosterError;
-        }
-
-        const profileIds = (rosterData || []).map((entry: any) => entry.profile_id);
-        const { data: qualificationData } = await supabase
-          .from('roster_qualifications')
-          .select('profile_id, tag')
-          .in('profile_id', profileIds.length ? profileIds : ['00000000-0000-0000-0000-000000000000']);
-
-        const qualificationsByProfile = new Map<string, string[]>();
-        (qualificationData || []).forEach((qualification: any) => {
-          const existing = qualificationsByProfile.get(qualification.profile_id) || [];
-          qualificationsByProfile.set(qualification.profile_id, [...existing, String(qualification.tag)]);
-        });
-
-        const roleCache = new Map<string, string>();
-        const idByUsernameCache = new Map<string, string>();
-
-        const resolveRobloxIdByUsername = async (username?: string | null) => {
-          const normalized = String(username || '').trim();
-          if (!normalized) return null;
-          if (idByUsernameCache.has(normalized)) return idByUsernameCache.get(normalized) as string;
-
-          try {
-            const response = await fetch('https://users.roblox.com/v1/usernames/users', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ usernames: [normalized], excludeBannedUsers: false })
-            });
-
-            if (!response.ok) {
-              return null;
-            }
-
-            const payload = await response.json().catch(() => ({}));
-            const first = Array.isArray(payload?.data) ? payload.data[0] : null;
-            if (!first?.id) {
-              return null;
-            }
-
-            const resolved = String(first.id);
-            idByUsernameCache.set(normalized, resolved);
-            return resolved;
-          } catch {
-            return null;
-          }
-        };
-
-        const resolveGroupRank = async (robloxId?: string | null, robloxUsername?: string | null, fallbackRank = 'Unknown') => {
-          let resolvedId = robloxId || null;
-          if (!resolvedId) {
-            resolvedId = await resolveRobloxIdByUsername(robloxUsername);
-          }
-
-          if (!resolvedId) return fallbackRank;
-          if (roleCache.has(resolvedId)) return roleCache.get(resolvedId) as string;
-
-          try {
-            const response = await fetch(`https://groups.roblox.com/v1/users/${encodeURIComponent(resolvedId)}/groups/roles`);
-            if (!response.ok) {
-              roleCache.set(resolvedId, fallbackRank);
-              return fallbackRank;
-            }
-
-            const payload = await response.json().catch(() => ({}));
-            const groupRole = Array.isArray(payload?.data)
-              ? payload.data.find((entry: any) => String(entry?.group?.id) === GROUP_ID)
-              : null;
-            const resolved = groupRole?.role?.name ? String(groupRole.role.name) : fallbackRank;
-            roleCache.set(resolvedId, resolved);
-            return resolved;
-          } catch {
-            roleCache.set(resolvedId, fallbackRank);
-            return fallbackRank;
-          }
-        };
-
-        const resolvedRows = await Promise.all(
-          ((rosterData || []) as RosterRecord[]).map(async (entry) => {
-            const robloxName = entry.profile?.roblox_username || entry.profile?.discord_username || 'Unknown';
-            const groupRank = await resolveGroupRank(entry.profile?.roblox_id, entry.profile?.roblox_username, entry.rank || 'Unranked');
-
-            return {
-              combinedName: `${groupRank} - ${robloxName}`,
-              unit: entry.company || 'Unassigned',
-              groupRank,
-              tags: qualificationsByProfile.get(entry.profile_id) || []
-            };
-          })
-        );
-
-        setRows(resolvedRows);
-        setRosterRows((rosterData || []) as RosterRecord[]);
-      } catch (error) {
-        console.error('Personnel roster load failed', error);
-        setRows([]);
-        setRosterRows([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     void loadPersonnel();
   }, []);
 
@@ -181,6 +181,31 @@ export default function PersonnelPage() {
     }
   };
 
+  const syncRanksFromRobloxGroup = async () => {
+    setSyncingRanks(true);
+    try {
+      for (const entry of rosterRows) {
+        const resolvedRank = await resolveGroupRank(entry.profile?.roblox_id, entry.profile?.roblox_username, entry.rank || 'Unranked');
+        if (resolvedRank && resolvedRank !== entry.rank) {
+          const { error } = await supabase
+            .from('roster')
+            .update({ rank: resolvedRank })
+            .eq('profile_id', entry.profile_id);
+
+          if (error) {
+            throw error;
+          }
+        }
+      }
+
+      await loadPersonnel();
+    } catch (syncError) {
+      console.error('Rank sync failed', syncError);
+    } finally {
+      setSyncingRanks(false);
+    }
+  };
+
   return (
     <section className="space-y-6">
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
@@ -200,7 +225,17 @@ export default function PersonnelPage() {
 
       {isStaff && (
         <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
-          <div className="mb-4 text-[10px] uppercase tracking-[0.35em] text-slate-400">Personnel Management</div>
+          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Personnel Management</div>
+            <button
+              type="button"
+              onClick={() => void syncRanksFromRobloxGroup()}
+              disabled={syncingRanks}
+              className="rounded border border-slateBlue/70 px-3 py-2 text-xs uppercase tracking-[0.3em] text-slate-300 disabled:opacity-60"
+            >
+              {syncingRanks ? 'Syncing Group Ranks...' : 'Sync Ranks from Roblox Group'}
+            </button>
+          </div>
           <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">Assign Unit and Rank</h3>
           <div className="mt-4 space-y-3">
             {rosterRows.map((entry) => {

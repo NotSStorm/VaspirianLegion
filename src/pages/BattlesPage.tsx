@@ -29,10 +29,12 @@ type BattleStatLog = {
 export default function BattlesPage() {
   const [battles, setBattles] = useState<Battle[]>([]);
   const [logs, setLogs] = useState<BattleStatLog[]>([]);
+  const [unitByName, setUnitByName] = useState<Record<string, string>>({});
   const [isStaff, setIsStaff] = useState(false);
   const [selectedBattleId, setSelectedBattleId] = useState<string>('');
   const [logText, setLogText] = useState('');
-  const [importUnit, setImportUnit] = useState('87th Melrose');
+  const [pendingBattleDeleteId, setPendingBattleDeleteId] = useState<string | null>(null);
+  const [pendingLogDeleteId, setPendingLogDeleteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [formState, setFormState] = useState({
     id: '',
@@ -53,13 +55,28 @@ export default function BattlesPage() {
       const { profile, session } = await getAuthenticatedState();
       setIsStaff(profile?.role === 'admin' || profile?.role === 'officer');
 
-      const [{ data: battleData, error: battleError }, { data: logData, error: logError }] = await Promise.all([
+      const [{ data: battleData, error: battleError }, { data: logData, error: logError }, { data: rosterData, error: rosterError }] = await Promise.all([
         supabase.from('battles').select('*').order('start_date', { ascending: false }),
-        supabase.from('battle_stat_logs').select('id, battle_id, participant_name, unit, kills, deaths, assists').order('created_at', { ascending: false })
+        supabase.from('battle_stat_logs').select('id, battle_id, participant_name, unit, kills, deaths, assists').order('created_at', { ascending: false }),
+        supabase.from('roster').select('callsign, company, profile:profiles!roster_profile_id_fkey(roblox_username, discord_username)')
       ]);
 
       if (battleError) throw battleError;
       if (logError) throw logError;
+      if (rosterError) throw rosterError;
+
+      const normalizeName = (value: string) => value.replace(/[_\s]+/g, '').toLowerCase();
+      const nameMap: Record<string, string> = {};
+      (rosterData || []).forEach((entry: any) => {
+        const unit = String(entry.company || 'Unassigned');
+        const aliases = [entry?.profile?.roblox_username, entry?.profile?.discord_username, entry?.callsign]
+          .map((alias) => String(alias || '').trim())
+          .filter(Boolean);
+        aliases.forEach((alias) => {
+          nameMap[normalizeName(alias)] = unit;
+        });
+      });
+      setUnitByName(nameMap);
 
       setBattles((battleData || []) as Battle[]);
       setLogs((logData || []) as BattleStatLog[]);
@@ -82,6 +99,12 @@ export default function BattlesPage() {
   }, []);
 
   const selectedLogs = useMemo(() => logs.filter((entry) => entry.battle_id === selectedBattleId), [logs, selectedBattleId]);
+  const selectedBattle = useMemo(() => battles.find((battle) => battle.id === selectedBattleId) || null, [battles, selectedBattleId]);
+
+  const inferUnit = (participantName: string) => {
+    const normalized = participantName.replace(/[_\s]+/g, '').toLowerCase();
+    return unitByName[normalized] || 'Unassigned';
+  };
 
   const saveBattle = async () => {
     setError(null);
@@ -167,6 +190,37 @@ export default function BattlesPage() {
     }
   };
 
+  const deleteBattle = async (id: string) => {
+    setError(null);
+    try {
+      const { error: deleteError } = await supabase.from('battles').delete().eq('id', id);
+      if (deleteError) throw deleteError;
+
+      if (selectedBattleId === id) {
+        setSelectedBattleId('');
+      }
+
+      if (formState.id === id) {
+        setFormState({
+          id: '',
+          name: '',
+          classification: 'Public',
+          status: 'Pending',
+          theater: '',
+          commandingOfficer: '',
+          personnelCount: 0,
+          date: '',
+          threatLevel: 1,
+          description: ''
+        });
+      }
+
+      await loadBattles();
+    } catch (deleteErr) {
+      setError(deleteErr instanceof Error ? deleteErr.message : 'Unable to delete battle.');
+    }
+  };
+
   const importLogs = async () => {
     if (!selectedBattleId || !logText.trim()) {
       return;
@@ -200,7 +254,7 @@ export default function BattlesPage() {
           return {
             battle_id: selectedBattleId,
             participant_name: String(participantName).trim(),
-            unit: importUnit,
+            unit: inferUnit(String(participantName).trim()),
             kills: Number(kills) || 0,
             deaths: Number(deaths) || 0,
             assists: Number(assists) || 0,
@@ -234,7 +288,7 @@ export default function BattlesPage() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         {battles.map((battle) => (
-          <div key={battle.id}>
+          <div key={battle.id} className={selectedBattleId === battle.id ? 'rounded border border-silver/40 p-1' : ''}>
             <BattleCard
               name={battle.name}
               classification={battle.classification}
@@ -245,25 +299,41 @@ export default function BattlesPage() {
               date={battle.start_date}
               threatLevel={battle.threat_level}
             />
+            <button
+              type="button"
+              onClick={() => setSelectedBattleId(battle.id)}
+              className="mt-2 rounded border border-slateBlue/70 px-3 py-1 text-xs uppercase tracking-[0.3em] text-slate-300"
+            >
+              View Logs
+            </button>
             {isStaff && (
-              <button
-                type="button"
-                onClick={() => setFormState({
-                  id: battle.id,
-                  name: battle.name,
-                  classification: battle.classification,
-                  status: battle.status,
-                  theater: battle.theater,
-                  commandingOfficer: battle.commanding_officer,
-                  personnelCount: battle.personnel_count,
-                  date: battle.start_date,
-                  threatLevel: battle.threat_level,
-                  description: battle.description
-                })}
-                className="mt-2 rounded border border-slateBlue/70 px-3 py-1 text-xs uppercase tracking-[0.3em] text-slate-300"
-              >
-                Edit Battle
-              </button>
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFormState({
+                    id: battle.id,
+                    name: battle.name,
+                    classification: battle.classification,
+                    status: battle.status,
+                    theater: battle.theater,
+                    commandingOfficer: battle.commanding_officer,
+                    personnelCount: battle.personnel_count,
+                    date: battle.start_date,
+                    threatLevel: battle.threat_level,
+                    description: battle.description
+                  })}
+                  className="rounded border border-slateBlue/70 px-3 py-1 text-xs uppercase tracking-[0.3em] text-slate-300"
+                >
+                  Edit Battle
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingBattleDeleteId(battle.id)}
+                  className="rounded border border-red-500/60 px-3 py-1 text-xs uppercase tracking-[0.3em] text-red-300"
+                >
+                  Delete Battle
+                </button>
+              </div>
             )}
           </div>
         ))}
@@ -311,6 +381,7 @@ export default function BattlesPage() {
 
           <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
             <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">Battle Logs (Name / K / D / A)</h3>
+            <p className="mt-1 text-sm text-slate-300">Selected battle: <span className="font-semibold text-silver">{selectedBattle?.name || 'None selected'}</span></p>
             <div className="mt-4 grid gap-3">
               <label className="text-xs text-slate-400">Battle
                 <select value={selectedBattleId} onChange={(event) => setSelectedBattleId(event.target.value)} className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver">
@@ -322,13 +393,7 @@ export default function BattlesPage() {
               <label className="text-xs text-slate-400">Paste Tab/CSV Logs (Name\tK\tD\tA)
                 <textarea value={logText} onChange={(event) => setLogText(event.target.value)} placeholder="Name\tK\tD\tA" className="mt-1 min-h-[90px] w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
               </label>
-              <label className="text-xs text-slate-400">Unit For Imported Rows
-                <select value={importUnit} onChange={(event) => setImportUnit(event.target.value)} className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver">
-                  <option value="87th Melrose">87th Melrose</option>
-                  <option value="82nd Pirkland">82nd Pirkland</option>
-                  <option value="Battery Command">Battery Command</option>
-                </select>
-              </label>
+              <p className="text-xs text-slate-400">Units are auto-mapped from Personnel roster by name, and remain editable per row.</p>
               <button type="button" onClick={() => void importLogs()} className="rounded border border-slateBlue/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-silver">Import Logs</button>
 
               <div className="overflow-auto rounded border border-slateBlue/60">
@@ -362,7 +427,7 @@ export default function BattlesPage() {
                         <td className="px-3 py-2">
                           <div className="flex gap-2">
                             <button type="button" onClick={() => void upsertLog(entry)} className="rounded border border-slateBlue/70 px-2 py-1 text-[10px] uppercase tracking-[0.3em] text-slate-300">Save</button>
-                            <button type="button" onClick={() => void deleteLog(entry.id)} className="rounded border border-red-500/60 px-2 py-1 text-[10px] uppercase tracking-[0.3em] text-red-300">Delete</button>
+                            <button type="button" onClick={() => setPendingLogDeleteId(entry.id)} className="rounded border border-red-500/60 px-2 py-1 text-[10px] uppercase tracking-[0.3em] text-red-300">Delete</button>
                           </div>
                         </td>
                       </tr>
@@ -370,6 +435,68 @@ export default function BattlesPage() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingBattleDeleteId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded border border-slateBlue/70 bg-[#141a24] p-6">
+            <h4 className="text-lg font-semibold uppercase tracking-[0.2em] text-silver">Delete Battle</h4>
+            <p className="mt-3 text-sm text-slate-300">This removes the battle and its linked logs. Continue?</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingBattleDeleteId(null)}
+                className="rounded border border-slateBlue/70 px-3 py-2 text-xs uppercase tracking-[0.3em] text-slate-300"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const targetId = pendingBattleDeleteId;
+                  setPendingBattleDeleteId(null);
+                  if (targetId) {
+                    await deleteBattle(targetId);
+                  }
+                }}
+                className="rounded border border-red-500/60 bg-red-500/10 px-3 py-2 text-xs uppercase tracking-[0.3em] text-red-300"
+              >
+                Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingLogDeleteId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded border border-slateBlue/70 bg-[#141a24] p-6">
+            <h4 className="text-lg font-semibold uppercase tracking-[0.2em] text-silver">Delete Log Entry</h4>
+            <p className="mt-3 text-sm text-slate-300">This log entry will be permanently removed. Continue?</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingLogDeleteId(null)}
+                className="rounded border border-slateBlue/70 px-3 py-2 text-xs uppercase tracking-[0.3em] text-slate-300"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const targetId = pendingLogDeleteId;
+                  setPendingLogDeleteId(null);
+                  if (targetId) {
+                    await deleteLog(targetId);
+                  }
+                }}
+                className="rounded border border-red-500/60 bg-red-500/10 px-3 py-2 text-xs uppercase tracking-[0.3em] text-red-300"
+              >
+                Confirm Delete
+              </button>
             </div>
           </div>
         </div>

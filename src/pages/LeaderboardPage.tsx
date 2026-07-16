@@ -48,7 +48,27 @@ export default function LeaderboardPage() {
       });
       setBattleDates(dateMap);
     };
+
     void load();
+
+    const channel = supabase
+      .channel('leaderboard-live-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'battle_stat_logs' }, () => {
+        void load();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'battles' }, () => {
+        void load();
+      })
+      .subscribe();
+
+    const pollId = window.setInterval(() => {
+      void load();
+    }, 20000);
+
+    return () => {
+      window.clearInterval(pollId);
+      void supabase.removeChannel(channel);
+    };
   }, []);
 
   const aggregate = (period: 'weekly' | 'monthly') => {

@@ -84,7 +84,27 @@ export default function RallyTrackerPage() {
 
       setPoints(resolved);
     };
+
     void load();
+
+    const channel = supabase
+      .channel('rally-tracker-live-updates')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'battle_stat_logs' }, () => {
+        void load();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'battles' }, () => {
+        void load();
+      })
+      .subscribe();
+
+    const pollId = window.setInterval(() => {
+      void load();
+    }, 20000);
+
+    return () => {
+      window.clearInterval(pollId);
+      void supabase.removeChannel(channel);
+    };
   }, [period]);
 
   const maxY = useMemo(() => {
