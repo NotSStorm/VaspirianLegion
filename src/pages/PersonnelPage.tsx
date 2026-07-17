@@ -4,66 +4,162 @@ import { getAuthenticatedState } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 
 const GROUP_ID = '5531725';
-const roleCache = new Map<string, string>();
-const idByUsernameCache = new Map<string, string>();
+const USERNAME_BATCH_SIZE = 100;
+const USERNAME_RESOLVE_RETRIES = 3;
+const ROLE_LOOKUP_RETRIES = 3;
+const ROLE_LOOKUP_DELAY_MS = 120;
+const ROLE_LOOKUP_CONCURRENCY = 4;
 
-async function resolveRobloxIdByUsername(username?: string | null) {
-  const normalized = String(username || '').trim();
-  if (!normalized) return null;
-  if (idByUsernameCache.has(normalized)) return idByUsernameCache.get(normalized) as string;
+type RobloxUserLookup = {
+  id?: number | string;
+  name?: string;
+  requestedUsername?: string;
+};
 
-  try {
-    const response = await fetch('https://users.roblox.com/v1/usernames/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usernames: [normalized], excludeBannedUsers: false })
-    });
+type RobloxGroupsRoleEntry = {
+  group?: {
+    id?: number | string;
+  };
+  role?: {
+    name?: string;
+  };
+};
 
-    if (!response.ok) {
-      return null;
-    }
+type SyncSummary = {
+  totalRosterRows: number;
+  rowsWithUsableUsername: number;
+  uniqueUsernamesChecked: number;
+  usernamesResolved: number;
+  usernamesUnresolved: string[];
+  roleLookupFailures: string[];
+  ranksUpdated: number;
+  ranksUnchanged: number;
+  failedProfileUpdates: string[];
+  skippedMissingUsername: number;
+};
 
-    const payload = await response.json().catch(() => ({}));
-    const first = Array.isArray(payload?.data) ? payload.data[0] : null;
-    if (!first?.id) {
-      return null;
-    }
-
-    const resolved = String(first.id);
-    idByUsernameCache.set(normalized, resolved);
-    return resolved;
-  } catch {
-    return null;
-  }
+function sleep(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
-async function resolveGroupRank(robloxId?: string | null, robloxUsername?: string | null, fallbackRank = 'Unknown') {
-  let resolvedId = robloxId || null;
-  if (!resolvedId) {
-    resolvedId = await resolveRobloxIdByUsername(robloxUsername);
+function chunk<T>(items: T[], size: number) {
+  if (size <= 0) {
+    return [items];
   }
 
-  if (!resolvedId) return fallbackRank;
-  if (roleCache.has(resolvedId)) return roleCache.get(resolvedId) as string;
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
 
-  try {
-    const response = await fetch(`https://groups.roblox.com/v1/users/${encodeURIComponent(resolvedId)}/groups/roles`);
+async function fetchWithRetry(url: string, init: RequestInit, retries: number, initialDelayMs: number) {
+  let attempt = 0;
+  let delayMs = initialDelayMs;
+
+  while (attempt <= retries) {
+    try {
+      const response = await fetch(url, init);
+      if (response.status !== 429 && response.status < 500) {
+        return response;
+      }
+
+      if (attempt === retries) {
+        return response;
+      }
+
+      const retryAfterHeader = response.headers.get('retry-after');
+      const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : Number.NaN;
+      const retryDelay = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+        ? retryAfterSeconds * 1000
+        : delayMs;
+      await sleep(retryDelay);
+    } catch (error) {
+      if (attempt === retries) {
+        throw error;
+      }
+      await sleep(delayMs);
+    }
+
+    attempt += 1;
+    delayMs *= 2;
+  }
+
+  throw new Error('Retry loop exited unexpectedly.');
+}
+
+async function resolveRobloxUserIds(usernames: string[]) {
+  const normalizedUnique = Array.from(new Set(usernames.map((username) => username.trim()).filter(Boolean)));
+  const mapping = new Map<string, string>();
+  const unresolved = new Set<string>();
+
+  for (const usernameBatch of chunk(normalizedUnique, USERNAME_BATCH_SIZE)) {
+    const response = await fetchWithRetry(
+      'https://users.roblox.com/v1/usernames/users',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usernames: usernameBatch, excludeBannedUsers: false })
+      },
+      USERNAME_RESOLVE_RETRIES,
+      300
+    );
+
     if (!response.ok) {
-      roleCache.set(resolvedId, fallbackRank);
-      return fallbackRank;
+      usernameBatch.forEach((username) => unresolved.add(username));
+      continue;
     }
 
     const payload = await response.json().catch(() => ({}));
-    const groupRole = Array.isArray(payload?.data)
-      ? payload.data.find((entry: any) => String(entry?.group?.id) === GROUP_ID)
-      : null;
-    const resolved = groupRole?.role?.name ? String(groupRole.role.name) : fallbackRank;
-    roleCache.set(resolvedId, resolved);
-    return resolved;
-  } catch {
-    roleCache.set(resolvedId, fallbackRank);
-    return fallbackRank;
+    const data = Array.isArray(payload?.data) ? payload.data as RobloxUserLookup[] : [];
+    const seenInBatch = new Set<string>();
+
+    data.forEach((entry) => {
+      const resolvedId = entry?.id ? String(entry.id) : '';
+      const resolvedUsername = String(entry?.requestedUsername || entry?.name || '').trim();
+      if (!resolvedId || !resolvedUsername) {
+        return;
+      }
+
+      const key = resolvedUsername.toLowerCase();
+      mapping.set(key, resolvedId);
+      seenInBatch.add(key);
+    });
+
+    usernameBatch.forEach((username) => {
+      if (!seenInBatch.has(username.toLowerCase())) {
+        unresolved.add(username);
+      }
+    });
   }
+
+  return { mapping, unresolved: Array.from(unresolved) };
+}
+
+async function fetchRoleForRobloxUser(userId: string) {
+  const response = await fetchWithRetry(
+    `https://groups.roblox.com/v1/users/${encodeURIComponent(userId)}/groups/roles`,
+    { method: 'GET' },
+    ROLE_LOOKUP_RETRIES,
+    300
+  );
+
+  if (!response.ok) {
+    return { ok: false as const, roleName: null };
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  const groupRole = Array.isArray(payload?.data)
+    ? (payload.data as RobloxGroupsRoleEntry[]).find((entry) => String(entry?.group?.id) === GROUP_ID)
+    : null;
+
+  return {
+    ok: true as const,
+    roleName: groupRole?.role?.name ? String(groupRole.role.name) : 'Unranked'
+  };
 }
 
 type PersonnelRow = {
@@ -97,6 +193,7 @@ type RosterRecord = {
   id?: string;
   profile_id: string;
   rank: string;
+  callsign?: string | null;
   company?: string | null;
   profile?: {
     roblox_username?: string | null;
@@ -114,6 +211,8 @@ export default function PersonnelPage() {
   const [loading, setLoading] = useState(true);
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
   const [syncingRanks, setSyncingRanks] = useState(false);
+  const [syncSummary, setSyncSummary] = useState<SyncSummary | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const normalizeName = (value?: string | null) => String(value || '').trim().replace(/[_\s]+/g, '').toLowerCase();
 
@@ -130,7 +229,7 @@ export default function PersonnelPage() {
 
       const { data: rosterData, error: rosterError } = await supabase
         .from('roster')
-        .select('id, profile_id, rank, company, profile:profiles!roster_profile_id_fkey(roblox_username, roblox_id, discord_username, callsign)')
+        .select('id, profile_id, rank, callsign, company, profile:profiles!roster_profile_id_fkey(roblox_username, roblox_id, discord_username, callsign, rank, company)')
         .order('created_at', { ascending: true });
 
       if (rosterError) {
@@ -187,8 +286,8 @@ export default function PersonnelPage() {
 
       const rosterRowsResolved = await Promise.all(
         rosterRecords.map(async (entry) => {
-          const robloxName = entry.profile?.roblox_username || entry.profile?.discord_username || 'Unknown';
-          const groupRank = await resolveGroupRank(entry.profile?.roblox_id, entry.profile?.roblox_username, entry.rank || 'Unranked');
+          const robloxName = entry.profile?.roblox_username || entry.callsign || entry.profile?.discord_username || 'Unknown';
+          const groupRank = entry.rank || 'Unranked';
 
           return {
             key: `profile:${entry.profile_id}`,
@@ -205,11 +304,7 @@ export default function PersonnelPage() {
         Array.from(battleParticipants.values()).map(async (entry) => {
           const normalized = normalizeName(entry.participant_name);
           const matchedProfile = profileAliases.get(normalized) || null;
-          const groupRank = await resolveGroupRank(
-            matchedProfile?.roblox_id || null,
-            matchedProfile?.roblox_username || entry.participant_name,
-            matchedProfile?.rank || 'Unranked'
-          );
+          const groupRank = matchedProfile?.rank || 'Unranked';
 
           return {
             key: matchedProfile ? `profile:${matchedProfile.id}` : `battle:${normalized}`,
@@ -278,24 +373,91 @@ export default function PersonnelPage() {
 
   const syncRanksFromRobloxGroup = async () => {
     setSyncingRanks(true);
-    try {
-      for (const entry of rosterRows) {
-        const resolvedRank = await resolveGroupRank(entry.profile?.roblox_id, entry.profile?.roblox_username, entry.rank || 'Unranked');
-        if (resolvedRank && resolvedRank !== entry.rank) {
-          const { error } = await supabase
-            .from('roster')
-            .update({ rank: resolvedRank })
-            .eq('profile_id', entry.profile_id);
+    setSyncError(null);
+    setSyncSummary(null);
 
-          if (error) {
-            throw error;
+    try {
+      const rowsWithUsernames = rosterRows
+        .map((entry) => ({
+          entry,
+          username: String(entry.profile?.roblox_username || entry.callsign || '').trim()
+        }))
+        .filter((item) => item.username.length > 0);
+
+      const usernames = rowsWithUsernames.map((item) => item.username);
+      const uniqueUsernames = Array.from(new Set(usernames.map((username) => username.toLowerCase())));
+      const { mapping: userIdByUsername, unresolved } = await resolveRobloxUserIds(usernames);
+
+      const usersToCheck = Array.from(userIdByUsername.entries());
+      const rankByUsername = new Map<string, string>();
+      const roleLookupFailures = new Set<string>();
+
+      for (let index = 0; index < usersToCheck.length; index += ROLE_LOOKUP_CONCURRENCY) {
+        const segment = usersToCheck.slice(index, index + ROLE_LOOKUP_CONCURRENCY);
+        const segmentResults = await Promise.all(segment.map(async ([usernameKey, userId]) => {
+          const roleResult = await fetchRoleForRobloxUser(userId);
+          return { usernameKey, roleResult };
+        }));
+
+        segmentResults.forEach(({ usernameKey, roleResult }) => {
+          if (!roleResult.ok || !roleResult.roleName) {
+            roleLookupFailures.add(usernameKey);
+            return;
           }
+          rankByUsername.set(usernameKey, roleResult.roleName);
+        });
+
+        if (index + ROLE_LOOKUP_CONCURRENCY < usersToCheck.length) {
+          await sleep(ROLE_LOOKUP_DELAY_MS);
         }
       }
+
+      let ranksUpdated = 0;
+      let ranksUnchanged = 0;
+      const failedProfileUpdates: string[] = [];
+
+      for (const { entry, username } of rowsWithUsernames) {
+        const usernameKey = username.toLowerCase();
+        const resolvedRank = rankByUsername.get(usernameKey);
+        if (!resolvedRank) {
+          continue;
+        }
+
+        if (resolvedRank === entry.rank) {
+          ranksUnchanged += 1;
+          continue;
+        }
+
+        const { error } = await supabase
+          .from('roster')
+          .update({ rank: resolvedRank })
+          .eq('profile_id', entry.profile_id);
+
+        if (error) {
+          failedProfileUpdates.push(username);
+          continue;
+        }
+
+        ranksUpdated += 1;
+      }
+
+      setSyncSummary({
+        totalRosterRows: rosterRows.length,
+        rowsWithUsableUsername: rowsWithUsernames.length,
+        uniqueUsernamesChecked: uniqueUsernames.length,
+        usernamesResolved: usersToCheck.length,
+        usernamesUnresolved: unresolved,
+        roleLookupFailures: Array.from(roleLookupFailures),
+        ranksUpdated,
+        ranksUnchanged,
+        failedProfileUpdates,
+        skippedMissingUsername: rosterRows.length - rowsWithUsernames.length
+      });
 
       await loadPersonnel();
     } catch (syncError) {
       console.error('Rank sync failed', syncError);
+      setSyncError(syncError instanceof Error ? syncError.message : 'Unable to sync ranks right now.');
     } finally {
       setSyncingRanks(false);
     }
@@ -331,10 +493,26 @@ export default function PersonnelPage() {
               {syncingRanks ? 'Syncing Group Ranks...' : 'Sync Ranks from Roblox Group'}
             </button>
           </div>
+          {syncError && <p className="mb-4 text-sm text-red-400">{syncError}</p>}
+          {syncSummary && (
+            <div className="mb-4 rounded border border-slateBlue/60 bg-[#0d121b] p-3 text-sm text-slate-300">
+              <p>
+                Synced {syncSummary.ranksUpdated} roster ranks. Unchanged: {syncSummary.ranksUnchanged}. Resolved usernames: {syncSummary.usernamesResolved} of {syncSummary.uniqueUsernamesChecked}.
+              </p>
+              <p className="mt-1">
+                Missing usernames: {syncSummary.skippedMissingUsername}. Failed role lookups: {syncSummary.roleLookupFailures.length}. Failed updates: {syncSummary.failedProfileUpdates.length}.
+              </p>
+              {syncSummary.usernamesUnresolved.length > 0 && (
+                <p className="mt-1 text-amber-300">
+                  Could not resolve usernames: {syncSummary.usernamesUnresolved.slice(0, 10).join(', ')}{syncSummary.usernamesUnresolved.length > 10 ? '...' : ''}
+                </p>
+              )}
+            </div>
+          )}
           <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">Assign Unit and Rank</h3>
           <div className="mt-4 space-y-3">
             {rosterRows.map((entry) => {
-              const displayName = entry.profile?.roblox_username || entry.profile?.discord_username || entry.profile_id;
+              const displayName = entry.profile?.roblox_username || entry.callsign || entry.profile?.discord_username || entry.profile_id;
               const busy = activeProfileId === entry.profile_id;
 
               return (
