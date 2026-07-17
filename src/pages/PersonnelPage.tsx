@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import AssignmentSelect from '../components/shared/AssignmentSelect';
 import PersonnelTable from '../components/shared/PersonnelTable';
 import { getAuthenticatedState } from '../lib/auth';
 import { supabase } from '../lib/supabase';
@@ -38,6 +39,8 @@ const RANK_ALIASES: Record<string, string> = {
   'lieutenant colonel': 'Lieutenant Colonel',
   'sub lieutenant': 'Sub-Lieutenant'
 };
+
+const HIGH_RANK_PATTERN = /\bgeneral\b|brigadier|field marshal|marshal|admiral/i;
 
 type BulkSyncResponse = {
   groupId: string;
@@ -146,6 +149,20 @@ export default function PersonnelPage() {
     }
 
     return ALLOWED_GROUP_RANKS[allowedIndex];
+  };
+
+  const isRosterEligibleRank = (value?: string | null) => {
+    const raw = String(value || '').trim();
+    if (!raw) {
+      return true;
+    }
+
+    const aliasResolved = RANK_ALIASES[raw.toLowerCase()] || raw;
+    if (HIGH_RANK_PATTERN.test(aliasResolved)) {
+      return false;
+    }
+
+    return true;
   };
 
   const normalizeSyncedRank = (value?: string | null) => {
@@ -258,6 +275,9 @@ export default function PersonnelPage() {
       const rosterRowsResolved = await Promise.all(
         rosterRecords.map(async (entry) => {
           const robloxName = entry.profile?.roblox_username || entry.callsign || entry.profile?.discord_username || 'Unknown';
+          if (!isRosterEligibleRank(entry.rank)) {
+            return null;
+          }
           const groupRank = sanitizeGroupRank(entry.rank);
 
           return {
@@ -276,7 +296,11 @@ export default function PersonnelPage() {
           const normalized = normalizeName(entry.participant_name);
           const matchedProfile = profileAliases.get(normalized) || null;
           const directoryMatch = personnelByAlias.get(normalized) || null;
-          const groupRank = sanitizeGroupRank(matchedProfile?.rank || directoryMatch?.rank || 'Unranked');
+          const sourceRank = matchedProfile?.rank || directoryMatch?.rank || 'Unranked';
+          if (!isRosterEligibleRank(sourceRank)) {
+            return null;
+          }
+          const groupRank = sanitizeGroupRank(sourceRank);
 
           return {
             key: matchedProfile ? `profile:${matchedProfile.id}` : `battle:${normalized}`,
@@ -292,6 +316,9 @@ export default function PersonnelPage() {
       const mergedRows = new Map<string, PersonnelSourceRow>();
 
       [...battleRowsResolved, ...rosterRowsResolved].forEach((row) => {
+        if (!row) {
+          return;
+        }
         const existing = mergedRows.get(row.key);
         if (!existing || row.priority > existing.priority) {
           mergedRows.set(row.key, row);
@@ -592,9 +619,16 @@ export default function PersonnelPage() {
   const assignablePersonnelRows = personnelDirectoryRows
     .filter((entry) => {
       const key = normalizeName(entry.roblox_username);
-      return Boolean(key) && !rosterAliases.has(key);
+      return Boolean(key) && !rosterAliases.has(key) && isRosterEligibleRank(entry.rank);
     })
     .sort((left, right) => left.roblox_username.localeCompare(right.roblox_username));
+
+  const unitOptions = [
+    { value: 'Unassigned', label: 'Unassigned' },
+    { value: 'Battery Command', label: 'Battery Command' },
+    { value: '82nd Pirkland', label: '82nd Pirkland' },
+    { value: '87th Melrose', label: '87th Melrose' }
+  ];
 
   return (
     <section className="space-y-6">
@@ -604,7 +638,19 @@ export default function PersonnelPage() {
             <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Personnel Ledger</div>
             <h2 className="mt-2 text-3xl font-semibold uppercase tracking-[0.2em] text-silver">Roster</h2>
           </div>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" placeholder="Search by username or rank" />
+          <div className="flex flex-col gap-3 sm:min-w-[20rem] sm:flex-row sm:items-center">
+            <input value={query} onChange={(e) => setQuery(e.target.value)} className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" placeholder="Search by username or rank" />
+            {isStaff && (
+              <button
+                type="button"
+                onClick={() => void syncRanksFromRobloxGroup()}
+                disabled={syncingRanks}
+                className="rounded border border-slateBlue/70 px-3 py-2 text-xs uppercase tracking-[0.3em] text-slate-300 disabled:opacity-60"
+              >
+                {syncingRanks ? 'Syncing Group Ranks...' : 'Sync Ranks from Roblox Group'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -633,16 +679,6 @@ export default function PersonnelPage() {
             </div>
           )}
           <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">Assign Unit</h3>
-          <div className="mt-4 flex justify-end">
-            <button
-              type="button"
-              onClick={() => void syncRanksFromRobloxGroup()}
-              disabled={syncingRanks}
-              className="rounded border border-slateBlue/70 px-3 py-2 text-xs uppercase tracking-[0.3em] text-slate-300 disabled:opacity-60"
-            >
-              {syncingRanks ? 'Syncing Group Ranks...' : 'Sync Ranks from Roblox Group'}
-            </button>
-          </div>
           <div className="mt-4 space-y-3">
             {rosterRows.map((entry) => {
               const displayName = entry.profile?.roblox_username || entry.callsign || entry.profile?.discord_username || entry.profile_id;
@@ -653,17 +689,13 @@ export default function PersonnelPage() {
                   <div className="text-sm font-semibold text-silver">{displayName}</div>
                   <label className="text-xs text-slate-400">
                     Unit
-                    <select
+                    <AssignmentSelect
                       value={entry.company || ''}
-                      onChange={(event) => void updateRosterField(entry, { company: event.target.value })}
+                      onChange={(nextUnit) => void updateRosterField(entry, { company: nextUnit })}
                       disabled={busy}
+                      options={unitOptions}
                       className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
-                    >
-                      <option value="Unassigned">Unassigned</option>
-                      <option value="Battery Command">Battery Command</option>
-                      <option value="82nd Pirkland">82nd Pirkland</option>
-                      <option value="87th Melrose">87th Melrose</option>
-                    </select>
+                    />
                   </label>
                 </div>
               );
@@ -679,17 +711,13 @@ export default function PersonnelPage() {
                       <div className="text-sm font-semibold text-silver">{entry.roblox_username}</div>
                       <label className="text-xs text-slate-400">
                         Unit
-                        <select
+                        <AssignmentSelect
                           value={entry.unit || 'Unassigned'}
-                          onChange={(event) => void updatePersonnelUnit(entry, event.target.value)}
+                          onChange={(nextUnit) => void updatePersonnelUnit(entry, nextUnit)}
                           disabled={busy}
+                          options={unitOptions}
                           className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
-                        >
-                          <option value="Unassigned">Unassigned</option>
-                          <option value="Battery Command">Battery Command</option>
-                          <option value="82nd Pirkland">82nd Pirkland</option>
-                          <option value="87th Melrose">87th Melrose</option>
-                        </select>
+                        />
                       </label>
                     </div>
                   );

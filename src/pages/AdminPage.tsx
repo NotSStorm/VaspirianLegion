@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import AssignmentSelect from '../components/shared/AssignmentSelect';
 import { supabase } from '../lib/supabase';
 
 type ApplicationReviewRow = {
@@ -92,7 +93,7 @@ export default function AdminPage() {
   const filteredProfiles = useMemo(() => {
     const query = roleSearch.trim().toLowerCase();
     if (!query) {
-      return [] as ProfileRoleRow[];
+      return profiles;
     }
 
     return profiles.filter((profile) => {
@@ -246,6 +247,12 @@ export default function AdminPage() {
     }
   };
 
+  const roleOptions = [
+    { value: 'member', label: 'Member' },
+    { value: 'officer', label: 'Officer' },
+    { value: 'admin', label: 'Admin' }
+  ];
+
   return (
     <section className="space-y-8">
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
@@ -364,9 +371,7 @@ export default function AdminPage() {
               />
             </label>
 
-            {roleSearch.trim().length === 0 ? (
-              <p className="text-sm text-slate-400">Search for a user to show admin assignment controls.</p>
-            ) : filteredProfiles.length === 0 ? (
+            {filteredProfiles.length === 0 ? (
               <p className="text-sm text-slate-400">No users matched your search.</p>
             ) : filteredProfiles.map((profile) => {
               const displayName = profile.roblox_username || profile.discord_username || profile.id;
@@ -384,32 +389,19 @@ export default function AdminPage() {
                     </div>
                     <div className="text-xs text-slate-400">Joined: {prettyDate(profile.created_at)}</div>
                   </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void updateUserRole(profile.id, 'admin')}
-                      disabled={busy || isSelf || !canPromoteToAdmin}
-                      className="rounded border border-emerald-500/60 bg-emerald-500/10 px-3 py-2 text-xs uppercase tracking-[0.25em] text-emerald-200 disabled:opacity-60"
-                    >
-                      {busy ? 'Working...' : canPromoteToAdmin ? 'Promote to Admin' : 'Requires Sgt+'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void updateUserRole(profile.id, 'officer')}
+                  <label className="mt-3 block text-xs text-slate-400">
+                    Role Assignment
+                    <AssignmentSelect
+                      value={profile.role}
+                      onChange={(nextRole) => void updateUserRole(profile.id, nextRole as 'member' | 'officer' | 'admin')}
                       disabled={busy || isSelf}
-                      className="rounded border border-slateBlue/70 px-3 py-2 text-xs uppercase tracking-[0.25em] text-slate-300 disabled:opacity-60"
-                    >
-                      Set Officer
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void updateUserRole(profile.id, 'member')}
-                      disabled={busy || isSelf}
-                      className="rounded border border-slateBlue/70 px-3 py-2 text-xs uppercase tracking-[0.25em] text-slate-300 disabled:opacity-60"
-                    >
-                      Set Member
-                    </button>
-                  </div>
+                      options={roleOptions.map((option) => ({
+                        ...option,
+                        disabled: option.value === 'admin' && !canPromoteToAdmin
+                      }))}
+                      className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
+                    />
+                  </label>
                 </div>
               );
             })}
