@@ -21,14 +21,18 @@ type BulkSyncResponse = {
 type SyncSummary = {
   totalRosterRows: number;
   totalPersonnelRows: number;
+  totalPersonnelDirectoryRows: number;
   rowsWithUsableUsername: number;
   uniqueUsernamesChecked: number;
   usernamesResolved: number;
   usernamesUnresolved: string[];
   roleLookupFailures: string[];
-  ranksUpdated: number;
-  ranksUnchanged: number;
+  rosterRanksUpdated: number;
+  rosterRanksUnchanged: number;
+  personnelRanksUpdated: number;
+  personnelRanksUnchanged: number;
   failedProfileUpdates: string[];
+  failedPersonnelUpdates: string[];
   skippedMissingUsername: number;
 };
 
@@ -74,6 +78,12 @@ type RosterRecord = {
   } | null;
 };
 
+type PersonnelDirectoryRecord = {
+  roblox_username: string;
+  rank?: string | null;
+  unit?: string | null;
+};
+
 export default function PersonnelPage() {
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<PersonnelRow[]>([]);
@@ -84,6 +94,7 @@ export default function PersonnelPage() {
   const [syncingRanks, setSyncingRanks] = useState(false);
   const [syncSummary, setSyncSummary] = useState<SyncSummary | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [personnelDirectoryRows, setPersonnelDirectoryRows] = useState<PersonnelDirectoryRecord[]>([]);
 
   const normalizeName = (value?: string | null) => String(value || '').trim().replace(/[_\s]+/g, '').toLowerCase();
 
@@ -107,14 +118,25 @@ export default function PersonnelPage() {
         throw rosterError;
       }
 
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('id, rank, company, roblox_username, roblox_id, discord_username, callsign');
+      const [{ data: profileData }, { data: battleLogData }, personnelResponse] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('id, rank, company, roblox_username, roblox_id, discord_username, callsign'),
+        supabase
+          .from('battle_stat_logs')
+          .select('participant_name, unit, created_at')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('personnel')
+          .select('roblox_username, rank, unit')
+      ]);
 
-      const { data: battleLogData } = await supabase
-        .from('battle_stat_logs')
-        .select('participant_name, unit, created_at')
-        .order('created_at', { ascending: false });
+      const personnelError = personnelResponse.error;
+      if (personnelError && !/does not exist|relation/i.test(personnelError.message)) {
+        throw personnelError;
+      }
+
+      const personnelDirectory = (personnelResponse.data || []) as PersonnelDirectoryRecord[];
 
       const profileIds = (rosterData || []).map((entry: any) => entry.profile_id);
       const { data: medalData } = await supabase
@@ -140,6 +162,13 @@ export default function PersonnelPage() {
       });
 
       const rosterRecords = (rosterData || []) as RosterRecord[];
+      const personnelByAlias = new Map<string, PersonnelDirectoryRecord>();
+      personnelDirectory.forEach((entry) => {
+        const normalized = normalizeName(entry.roblox_username);
+        if (normalized) {
+          personnelByAlias.set(normalized, entry);
+        }
+      });
 
       const battleParticipants = new Map<string, BattleLogParticipant>();
       ((battleLogData || []) as BattleLogParticipant[]).forEach((entry) => {
@@ -175,13 +204,14 @@ export default function PersonnelPage() {
         Array.from(battleParticipants.values()).map(async (entry) => {
           const normalized = normalizeName(entry.participant_name);
           const matchedProfile = profileAliases.get(normalized) || null;
-          const groupRank = matchedProfile?.rank || 'Unranked';
+          const directoryMatch = personnelByAlias.get(normalized) || null;
+          const groupRank = matchedProfile?.rank || directoryMatch?.rank || 'Unranked';
 
           return {
             key: matchedProfile ? `profile:${matchedProfile.id}` : `battle:${normalized}`,
             priority: matchedProfile ? 1 : 0,
             combinedName: `${groupRank} - ${entry.participant_name}`,
-            unit: entry.unit || matchedProfile?.company || 'Unassigned',
+            unit: matchedProfile?.company || directoryMatch?.unit || entry.unit || 'Unassigned',
             groupRank,
             medals: matchedProfile ? (medalsByProfile.get(matchedProfile.id) || []) : []
           } as PersonnelSourceRow;
@@ -199,10 +229,12 @@ export default function PersonnelPage() {
 
       setRows(Array.from(mergedRows.values()).map(({ key, priority, ...row }) => row));
       setRosterRows(rosterRecords);
+      setPersonnelDirectoryRows(personnelDirectory);
     } catch (error) {
       console.error('Personnel roster load failed', error);
       setRows([]);
       setRosterRows([]);
+      setPersonnelDirectoryRows([]);
     } finally {
       setLoading(false);
     }
@@ -255,6 +287,10 @@ export default function PersonnelPage() {
         }))
         .filter((item) => item.username.length > 0);
 
+      const personnelDirectoryUsernames = personnelDirectoryRows
+        .map((entry) => String(entry.roblox_username || '').trim())
+        .filter(Boolean);
+
       const personnelUsernames = rows
         .map((row) => {
           const separator = ' - ';
@@ -268,22 +304,38 @@ export default function PersonnelPage() {
 
       const candidateUsernames = [
         ...rowsWithUsernames.map((item) => item.username),
+        ...personnelDirectoryUsernames,
         ...personnelUsernames
       ];
-      const uniqueUsernames = Array.from(new Set(candidateUsernames.map((username) => username.toLowerCase())));
+      const usernameByKey = new Map<string, string>();
+      candidateUsernames.forEach((username) => {
+        const trimmed = String(username || '').trim();
+        if (!trimmed) {
+          return;
+        }
+        const key = trimmed.toLowerCase();
+        if (!usernameByKey.has(key)) {
+          usernameByKey.set(key, trimmed);
+        }
+      });
+      const uniqueUsernames = Array.from(usernameByKey.values());
 
       if (uniqueUsernames.length === 0) {
         setSyncSummary({
           totalRosterRows: rosterRows.length,
           totalPersonnelRows: rows.length,
+          totalPersonnelDirectoryRows: personnelDirectoryRows.length,
           rowsWithUsableUsername: 0,
           uniqueUsernamesChecked: 0,
           usernamesResolved: 0,
           usernamesUnresolved: [],
           roleLookupFailures: [],
-          ranksUpdated: 0,
-          ranksUnchanged: 0,
+          rosterRanksUpdated: 0,
+          rosterRanksUnchanged: 0,
+          personnelRanksUpdated: 0,
+          personnelRanksUnchanged: 0,
           failedProfileUpdates: [],
+          failedPersonnelUpdates: [],
           skippedMissingUsername: rosterRows.length
         });
         await loadPersonnel();
@@ -309,9 +361,22 @@ export default function PersonnelPage() {
           .map(([username, rank]) => [String(username).toLowerCase(), String(rank)])
       );
 
-      let ranksUpdated = 0;
-      let ranksUnchanged = 0;
+      let rosterRanksUpdated = 0;
+      let rosterRanksUnchanged = 0;
+      let personnelRanksUpdated = 0;
+      let personnelRanksUnchanged = 0;
       const failedProfileUpdates: string[] = [];
+      const failedPersonnelUpdates: string[] = [];
+
+      const personnelDirectoryByKey = new Map<string, PersonnelDirectoryRecord>();
+      personnelDirectoryRows.forEach((entry) => {
+        const key = normalizeName(entry.roblox_username);
+        if (key) {
+          personnelDirectoryByKey.set(key, entry);
+        }
+      });
+
+      const nowIso = new Date().toISOString();
 
       for (const { entry, username } of rowsWithUsernames) {
         const usernameKey = username.toLowerCase();
@@ -321,7 +386,7 @@ export default function PersonnelPage() {
         }
 
         if (resolvedRank === entry.rank) {
-          ranksUnchanged += 1;
+          rosterRanksUnchanged += 1;
           continue;
         }
 
@@ -335,20 +400,55 @@ export default function PersonnelPage() {
           continue;
         }
 
-        ranksUpdated += 1;
+        rosterRanksUpdated += 1;
+      }
+
+      for (const username of uniqueUsernames) {
+        const usernameKey = username.toLowerCase();
+        const resolvedRank = rankByUsername.get(usernameKey);
+        if (!resolvedRank) {
+          continue;
+        }
+
+        const existingDirectory = personnelDirectoryByKey.get(usernameKey) || null;
+        if (existingDirectory?.rank === resolvedRank) {
+          personnelRanksUnchanged += 1;
+          continue;
+        }
+
+        const { error } = await supabase
+          .from('personnel')
+          .upsert({
+            roblox_username: existingDirectory?.roblox_username || username,
+            rank: resolvedRank,
+            unit: existingDirectory?.unit || 'Unassigned',
+            last_rank_sync_at: nowIso,
+            updated_at: nowIso
+          }, { onConflict: 'roblox_username' });
+
+        if (error) {
+          failedPersonnelUpdates.push(username);
+          continue;
+        }
+
+        personnelRanksUpdated += 1;
       }
 
       setSyncSummary({
         totalRosterRows: rosterRows.length,
         totalPersonnelRows: rows.length,
+        totalPersonnelDirectoryRows: personnelDirectoryRows.length,
         rowsWithUsableUsername: rowsWithUsernames.length,
         uniqueUsernamesChecked: uniqueUsernames.length,
         usernamesResolved: syncPayload?.usernamesResolved || 0,
         usernamesUnresolved: Array.isArray(syncPayload?.unresolvedUsernames) ? syncPayload.unresolvedUsernames : [],
         roleLookupFailures: Array.isArray(syncPayload?.roleLookupFailures) ? syncPayload.roleLookupFailures : [],
-        ranksUpdated,
-        ranksUnchanged,
+        rosterRanksUpdated,
+        rosterRanksUnchanged,
+        personnelRanksUpdated,
+        personnelRanksUnchanged,
         failedProfileUpdates,
+        failedPersonnelUpdates,
         skippedMissingUsername: rosterRows.length - rowsWithUsernames.length
       });
 
@@ -395,10 +495,10 @@ export default function PersonnelPage() {
           {syncSummary && (
             <div className="mb-4 rounded border border-slateBlue/60 bg-[#0d121b] p-3 text-sm text-slate-300">
               <p>
-                Synced {syncSummary.ranksUpdated} roster ranks. Unchanged: {syncSummary.ranksUnchanged}. Resolved usernames: {syncSummary.usernamesResolved} of {syncSummary.uniqueUsernamesChecked}.
+                Synced {syncSummary.rosterRanksUpdated} roster ranks and {syncSummary.personnelRanksUpdated} personnel ranks. Unchanged: roster {syncSummary.rosterRanksUnchanged}, personnel {syncSummary.personnelRanksUnchanged}. Resolved usernames: {syncSummary.usernamesResolved} of {syncSummary.uniqueUsernamesChecked}.
               </p>
               <p className="mt-1">
-                Roster rows: {syncSummary.totalRosterRows}. Personnel rows: {syncSummary.totalPersonnelRows}. Missing usernames: {syncSummary.skippedMissingUsername}. Failed role lookups: {syncSummary.roleLookupFailures.length}. Failed updates: {syncSummary.failedProfileUpdates.length}.
+                Roster rows: {syncSummary.totalRosterRows}. Personnel rows: {syncSummary.totalPersonnelRows}. Personnel directory rows: {syncSummary.totalPersonnelDirectoryRows}. Missing usernames: {syncSummary.skippedMissingUsername}. Failed role lookups: {syncSummary.roleLookupFailures.length}. Failed updates: roster {syncSummary.failedProfileUpdates.length}, personnel {syncSummary.failedPersonnelUpdates.length}.
               </p>
               {syncSummary.usernamesUnresolved.length > 0 && (
                 <p className="mt-1 text-amber-300">

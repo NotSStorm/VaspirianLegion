@@ -34,6 +34,39 @@ type ParsedBattleLogInput = {
   unit: string;
 };
 
+async function upsertPersonnelDirectory(entries: Array<{ participant_name: string; unit: string }>) {
+  const uniqueByName = new Map<string, { roblox_username: string; unit: string; updated_at: string }>();
+  const nowIso = new Date().toISOString();
+
+  entries.forEach((entry) => {
+    const username = String(entry.participant_name || '').trim();
+    if (!username) {
+      return;
+    }
+
+    const key = username.toLowerCase();
+    if (!uniqueByName.has(key)) {
+      uniqueByName.set(key, {
+        roblox_username: username,
+        unit: String(entry.unit || 'Unassigned') || 'Unassigned',
+        updated_at: nowIso
+      });
+    }
+  });
+
+  if (uniqueByName.size === 0) {
+    return;
+  }
+
+  const { error } = await supabase
+    .from('personnel')
+    .upsert(Array.from(uniqueByName.values()), { onConflict: 'roblox_username' });
+
+  if (error && !/does not exist|relation/i.test(error.message)) {
+    throw error;
+  }
+}
+
 export default function BattlesPage() {
   const [battles, setBattles] = useState<Battle[]>([]);
   const [logs, setLogs] = useState<BattleStatLog[]>([]);
@@ -195,6 +228,11 @@ export default function BattlesPage() {
 
     const { error: insertError } = await supabase.from('battle_stat_logs').insert(payload);
     if (insertError) throw insertError;
+
+    await upsertPersonnelDirectory(entries.map((entry) => ({
+      participant_name: entry.participant_name,
+      unit: entry.unit
+    })));
   };
 
   const syncBattleDerivedFields = async (battleId: string) => {
@@ -292,6 +330,8 @@ export default function BattlesPage() {
         : await supabase.from('battle_stat_logs').insert(payload);
 
       if (insertError) throw insertError;
+
+      await upsertPersonnelDirectory([{ participant_name: payload.participant_name, unit: payload.unit }]);
 
       await syncBattleDerivedFields(selectedBattleId);
 
