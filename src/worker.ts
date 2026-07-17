@@ -422,6 +422,10 @@ export default {
         }
 
         const result = await fetchBulkGroupRanks(usernames, groupId);
+        const failed = Array.from(new Set([
+          ...result.unresolvedUsernames,
+          ...result.roleLookupFailures
+        ]));
         return jsonResponse({
           groupId,
           totalRequested: usernames.length,
@@ -429,7 +433,9 @@ export default {
           usernamesResolved: result.usernamesResolved,
           unresolvedUsernames: result.unresolvedUsernames,
           roleLookupFailures: result.roleLookupFailures,
-          rankByUsername: result.rankByUsername
+          rankByUsername: result.rankByUsername,
+          synced: result.usernamesResolved,
+          failed
         });
       } catch {
         return jsonResponse({ message: 'Unable to sync Roblox ranks right now.' }, 500);

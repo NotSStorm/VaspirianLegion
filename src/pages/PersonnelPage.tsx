@@ -13,6 +13,8 @@ type BulkSyncResponse = {
   unresolvedUsernames: string[];
   roleLookupFailures: string[];
   rankByUsername: Record<string, string>;
+  synced?: number;
+  failed?: string[];
   message?: string;
 };
 
