@@ -20,9 +20,38 @@ type ProfileRoleRow = {
   id: string;
   discord_username?: string | null;
   roblox_username?: string | null;
+  rank?: string | null;
   role: 'member' | 'officer' | 'admin' | string;
   created_at: string;
 };
+
+type RosterRankRow = {
+  profile_id: string;
+  rank?: string | null;
+};
+
+const ADMIN_ELIGIBLE_RANKS = new Set([
+  'sergeant',
+  'staff sergeant',
+  'sergeant major',
+  'ensign',
+  'sub-lieutenant',
+  'sub lieutenant',
+  'lieutenant',
+  'captain',
+  'major',
+  'lieutenant colonel',
+  'lt colonel',
+  'colonel',
+  'sgt',
+  'ssgt'
+]);
+
+function rankEligibleForAdmin(rank?: string | null) {
+  const normalized = String(rank || '').trim().toLowerCase();
+  if (!normalized) return false;
+  return ADMIN_ELIGIBLE_RANKS.has(normalized);
+}
 
 function prettyDate(value?: string | null) {
   if (!value) return 'Unknown';
@@ -41,6 +70,7 @@ export default function AdminPage() {
   const [sessionUserId, setSessionUserId] = useState<string | null>(null);
   const [sessionRole, setSessionRole] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [roleSearch, setRoleSearch] = useState('');
 
   const pendingCount = useMemo(
     () => applications.filter((application) => application.status === 'pending').length,
@@ -59,6 +89,19 @@ export default function AdminPage() {
 
   const canManageRoles = sessionRole === 'admin';
 
+  const filteredProfiles = useMemo(() => {
+    const query = roleSearch.trim().toLowerCase();
+    if (!query) {
+      return [] as ProfileRoleRow[];
+    }
+
+    return profiles.filter((profile) => {
+      const displayName = String(profile.roblox_username || profile.discord_username || profile.id).toLowerCase();
+      const rank = String(profile.rank || '').toLowerCase();
+      return displayName.includes(query) || rank.includes(query);
+    });
+  }, [profiles, roleSearch]);
+
   const loadAdminData = async () => {
     setLoading(true);
     setError(null);
@@ -74,7 +117,7 @@ export default function AdminPage() {
 
       setSessionUserId(session.user.id);
 
-      const [{ data: sessionProfile, error: sessionProfileError }, { data, error: loadError }, { data: profileRows, error: profileError }] = await Promise.all([
+      const [{ data: sessionProfile, error: sessionProfileError }, { data, error: loadError }, { data: profileRows, error: profileError }, { data: rosterRows, error: rosterError }] = await Promise.all([
         supabase.from('profiles').select('role').eq('id', session.user.id).maybeSingle(),
         supabase
           .from('applications')
@@ -82,7 +125,11 @@ export default function AdminPage() {
           .order('created_at', { ascending: false }),
         supabase
           .from('profiles')
-          .select('id, discord_username, roblox_username, role, created_at')
+          .select('id, discord_username, roblox_username, rank, role, created_at')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('roster')
+          .select('profile_id, rank')
           .order('created_at', { ascending: false })
       ]);
 
@@ -100,8 +147,26 @@ export default function AdminPage() {
         throw profileError;
       }
 
+      if (rosterError) {
+        throw rosterError;
+      }
+
+      const rosterRankByProfile = new Map<string, string>();
+      ((rosterRows || []) as RosterRankRow[]).forEach((row) => {
+        const profileId = String(row.profile_id || '');
+        const rank = String(row.rank || '').trim();
+        if (profileId && rank) {
+          rosterRankByProfile.set(profileId, rank);
+        }
+      });
+
+      const mergedProfiles = ((profileRows || []) as ProfileRoleRow[]).map((profile) => ({
+        ...profile,
+        rank: rosterRankByProfile.get(profile.id) || profile.rank || null
+      }));
+
       setApplications((data || []) as ApplicationReviewRow[]);
-      setProfiles((profileRows || []) as ProfileRoleRow[]);
+      setProfiles(mergedProfiles);
     } catch (loadErr) {
       const message = loadErr instanceof Error ? loadErr.message : 'Unable to load applications.';
       setError(message);
@@ -289,10 +354,25 @@ export default function AdminPage() {
           <p className="mt-3 text-sm text-slate-400">No users found.</p>
         ) : (
           <div className="mt-4 space-y-3">
-            {profiles.map((profile) => {
+            <label className="block text-xs text-slate-400">
+              Search User To Manage Roles
+              <input
+                value={roleSearch}
+                onChange={(event) => setRoleSearch(event.target.value)}
+                placeholder="Type Roblox or Discord name"
+                className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
+              />
+            </label>
+
+            {roleSearch.trim().length === 0 ? (
+              <p className="text-sm text-slate-400">Search for a user to show admin assignment controls.</p>
+            ) : filteredProfiles.length === 0 ? (
+              <p className="text-sm text-slate-400">No users matched your search.</p>
+            ) : filteredProfiles.map((profile) => {
               const displayName = profile.roblox_username || profile.discord_username || profile.id;
               const isSelf = profile.id === sessionUserId;
               const busy = activeRoleId === profile.id;
+              const canPromoteToAdmin = rankEligibleForAdmin(profile.rank);
 
               return (
                 <div key={profile.id} className="rounded border border-slateBlue/60 p-4">
@@ -300,6 +380,7 @@ export default function AdminPage() {
                     <div>
                       <div className="font-semibold text-silver">{displayName}</div>
                       <div className="mt-1 text-xs uppercase tracking-[0.25em] text-slate-400">Current role: {profile.role}</div>
+                      <div className="mt-1 text-xs uppercase tracking-[0.25em] text-slate-400">Rank: {profile.rank || 'Unranked'}</div>
                     </div>
                     <div className="text-xs text-slate-400">Joined: {prettyDate(profile.created_at)}</div>
                   </div>
@@ -307,10 +388,10 @@ export default function AdminPage() {
                     <button
                       type="button"
                       onClick={() => void updateUserRole(profile.id, 'admin')}
-                      disabled={busy || isSelf}
+                      disabled={busy || isSelf || !canPromoteToAdmin}
                       className="rounded border border-emerald-500/60 bg-emerald-500/10 px-3 py-2 text-xs uppercase tracking-[0.25em] text-emerald-200 disabled:opacity-60"
                     >
-                      {busy ? 'Working...' : 'Promote to Admin'}
+                      {busy ? 'Working...' : canPromoteToAdmin ? 'Promote to Admin' : 'Requires Sgt+'}
                     </button>
                     <button
                       type="button"

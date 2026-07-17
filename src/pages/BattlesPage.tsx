@@ -314,10 +314,11 @@ export default function BattlesPage() {
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      const inferredUnit = inferUnit(entry.participant_name);
       const payload = {
         battle_id: selectedBattleId,
         participant_name: entry.participant_name,
-        unit: entry.unit || 'Unassigned',
+        unit: inferredUnit,
         kills: Number(entry.kills) || 0,
         deaths: Number(entry.deaths) || 0,
         assists: Number(entry.assists) || 0,
@@ -558,7 +559,7 @@ export default function BattlesPage() {
               <label className="text-xs text-slate-400">Paste Tab/CSV Logs (Name\tK\tD\tA)
                 <textarea value={logText} onChange={(event) => setLogText(event.target.value)} placeholder="Name\tK\tD\tA" className="mt-1 min-h-[90px] w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
               </label>
-              <p className="text-xs text-slate-400">Units are auto-mapped from Personnel roster by name, and remain editable per row.</p>
+              <p className="text-xs text-slate-400">Units are auto-mapped from roster/personnel aliases by name and are not manually editable here.</p>
               <button type="button" onClick={() => void importLogs()} className="rounded border border-slateBlue/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-silver">Import Logs</button>
 
               <div className="overflow-auto rounded border border-slateBlue/60">
@@ -582,13 +583,7 @@ export default function BattlesPage() {
                         <td className="px-3 py-2"><input type="number" value={entry.kills} onChange={(event) => setLogs((prev) => prev.map((row) => row.id === entry.id ? { ...row, kills: Number(event.target.value) } : row))} className="w-16 rounded border border-slateBlue/60 bg-[#0d121b] px-2 py-1 text-sm text-silver" /></td>
                         <td className="px-3 py-2"><input type="number" value={entry.deaths} onChange={(event) => setLogs((prev) => prev.map((row) => row.id === entry.id ? { ...row, deaths: Number(event.target.value) } : row))} className="w-16 rounded border border-slateBlue/60 bg-[#0d121b] px-2 py-1 text-sm text-silver" /></td>
                         <td className="px-3 py-2"><input type="number" value={entry.assists} onChange={(event) => setLogs((prev) => prev.map((row) => row.id === entry.id ? { ...row, assists: Number(event.target.value) } : row))} className="w-16 rounded border border-slateBlue/60 bg-[#0d121b] px-2 py-1 text-sm text-silver" /></td>
-                        <td className="px-3 py-2">
-                          <select value={entry.unit} onChange={(event) => setLogs((prev) => prev.map((row) => row.id === entry.id ? { ...row, unit: event.target.value } : row))} className="rounded border border-slateBlue/60 bg-[#0d121b] px-2 py-1 text-sm text-silver">
-                            <option value="87th Melrose">87th Melrose</option>
-                            <option value="82nd Pirkland">82nd Pirkland</option>
-                            <option value="Battery Command">Battery Command</option>
-                          </select>
-                        </td>
+                        <td className="px-3 py-2 text-slate-300">{inferUnit(entry.participant_name)}</td>
                         <td className="px-3 py-2">
                           <div className="flex gap-2">
                             <button type="button" onClick={() => void upsertLog(entry)} className="rounded border border-slateBlue/70 px-2 py-1 text-[10px] uppercase tracking-[0.3em] text-slate-300">Save</button>

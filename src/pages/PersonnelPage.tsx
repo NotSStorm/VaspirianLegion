@@ -4,6 +4,40 @@ import { getAuthenticatedState } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 
 const GROUP_ID = '5531725';
+const ALLOWED_GROUP_RANKS = [
+  'Conscript',
+  'Soldat',
+  'Musketier',
+  'Fusilier',
+  'Legionnaire',
+  'Lance Corporal',
+  'Corporal',
+  'Sergeant',
+  'Staff Sergeant',
+  'Sergeant Major',
+  'Ensign',
+  'Sub-Lieutenant',
+  'Lieutenant',
+  'Captain',
+  'Major',
+  'Lieutenant Colonel',
+  'Colonel'
+] as const;
+
+const RANK_INDEX_BY_KEY = new Map<string, number>(
+  ALLOWED_GROUP_RANKS.map((rank, index) => [rank.toLowerCase(), index])
+);
+
+const RANK_ALIASES: Record<string, string> = {
+  ssgt: 'Staff Sergeant',
+  'staff sergeant': 'Staff Sergeant',
+  sgt: 'Sergeant',
+  cpl: 'Corporal',
+  lcpl: 'Lance Corporal',
+  'lt colonel': 'Lieutenant Colonel',
+  'lieutenant colonel': 'Lieutenant Colonel',
+  'sub lieutenant': 'Sub-Lieutenant'
+};
 
 type BulkSyncResponse = {
   groupId: string;
@@ -91,12 +125,49 @@ export default function PersonnelPage() {
   const [isStaff, setIsStaff] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+  const [activePersonnelUsername, setActivePersonnelUsername] = useState<string | null>(null);
   const [syncingRanks, setSyncingRanks] = useState(false);
   const [syncSummary, setSyncSummary] = useState<SyncSummary | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [personnelDirectoryRows, setPersonnelDirectoryRows] = useState<PersonnelDirectoryRecord[]>([]);
 
   const normalizeName = (value?: string | null) => String(value || '').trim().replace(/[_\s]+/g, '').toLowerCase();
+
+  const sanitizeGroupRank = (value?: string | null) => {
+    const raw = String(value || '').trim();
+    if (!raw) {
+      return 'Unranked';
+    }
+
+    const aliasResolved = RANK_ALIASES[raw.toLowerCase()] || raw;
+    const allowedIndex = RANK_INDEX_BY_KEY.get(aliasResolved.toLowerCase());
+    if (allowedIndex === undefined) {
+      return raw;
+    }
+
+    return ALLOWED_GROUP_RANKS[allowedIndex];
+  };
+
+  const normalizeSyncedRank = (value?: string | null) => {
+    const raw = String(value || '').trim();
+    if (!raw) {
+      return null;
+    }
+
+    const aliasResolved = RANK_ALIASES[raw.toLowerCase()] || raw;
+    const allowedIndex = RANK_INDEX_BY_KEY.get(aliasResolved.toLowerCase());
+    if (allowedIndex === undefined) {
+      return 'Unranked';
+    }
+
+    return ALLOWED_GROUP_RANKS[allowedIndex];
+  };
+
+  const getRankSortWeight = (rank?: string | null) => {
+    const normalized = String(rank || '').trim().toLowerCase();
+    const rankIndex = RANK_INDEX_BY_KEY.get(normalized);
+    return rankIndex === undefined ? Number.MAX_SAFE_INTEGER : rankIndex;
+  };
 
   const collectAliases = (values: Array<string | null | undefined>) => values
     .map((value) => normalizeName(value))
@@ -187,7 +258,7 @@ export default function PersonnelPage() {
       const rosterRowsResolved = await Promise.all(
         rosterRecords.map(async (entry) => {
           const robloxName = entry.profile?.roblox_username || entry.callsign || entry.profile?.discord_username || 'Unknown';
-          const groupRank = entry.rank || 'Unranked';
+          const groupRank = sanitizeGroupRank(entry.rank);
 
           return {
             key: `profile:${entry.profile_id}`,
@@ -205,7 +276,7 @@ export default function PersonnelPage() {
           const normalized = normalizeName(entry.participant_name);
           const matchedProfile = profileAliases.get(normalized) || null;
           const directoryMatch = personnelByAlias.get(normalized) || null;
-          const groupRank = matchedProfile?.rank || directoryMatch?.rank || 'Unranked';
+          const groupRank = sanitizeGroupRank(matchedProfile?.rank || directoryMatch?.rank || 'Unranked');
 
           return {
             key: matchedProfile ? `profile:${matchedProfile.id}` : `battle:${normalized}`,
@@ -227,7 +298,18 @@ export default function PersonnelPage() {
         }
       });
 
-      setRows(Array.from(mergedRows.values()).map(({ key, priority, ...row }) => row));
+      setRows(
+        Array.from(mergedRows.values())
+          .map(({ key, priority, ...row }) => row)
+          .sort((left, right) => {
+            const rankDelta = getRankSortWeight(right.groupRank) - getRankSortWeight(left.groupRank);
+            if (rankDelta !== 0) {
+              return rankDelta;
+            }
+
+            return left.combinedName.localeCompare(right.combinedName);
+          })
+      );
       setRosterRows(rosterRecords);
       setPersonnelDirectoryRows(personnelDirectory);
     } catch (error) {
@@ -271,6 +353,36 @@ export default function PersonnelPage() {
       console.error('Roster update failed', updateError);
     } finally {
       setActiveProfileId(null);
+    }
+  };
+
+  const updatePersonnelUnit = async (entry: PersonnelDirectoryRecord, nextUnit: string) => {
+    const normalizedUnit = String(nextUnit || '').trim() || 'Unassigned';
+    setActivePersonnelUsername(entry.roblox_username);
+
+    try {
+      const { error } = await supabase
+        .from('personnel')
+        .update({
+          unit: normalizedUnit,
+          updated_at: new Date().toISOString()
+        })
+        .eq('roblox_username', entry.roblox_username);
+
+      if (error) {
+        throw error;
+      }
+
+      setPersonnelDirectoryRows((previous) => previous.map((row) => (
+        normalizeName(row.roblox_username) === normalizeName(entry.roblox_username)
+          ? { ...row, unit: normalizedUnit }
+          : row
+      )));
+      await loadPersonnel();
+    } catch (updateError) {
+      console.error('Personnel unit update failed', updateError);
+    } finally {
+      setActivePersonnelUsername(null);
     }
   };
 
@@ -380,7 +492,12 @@ export default function PersonnelPage() {
 
       for (const { entry, username } of rowsWithUsernames) {
         const usernameKey = username.toLowerCase();
-        const resolvedRank = rankByUsername.get(usernameKey);
+        const rawResolvedRank = rankByUsername.get(usernameKey);
+        if (!rawResolvedRank) {
+          continue;
+        }
+
+        const resolvedRank = normalizeSyncedRank(rawResolvedRank);
         if (!resolvedRank) {
           continue;
         }
@@ -405,7 +522,12 @@ export default function PersonnelPage() {
 
       for (const username of uniqueUsernames) {
         const usernameKey = username.toLowerCase();
-        const resolvedRank = rankByUsername.get(usernameKey);
+        const rawResolvedRank = rankByUsername.get(usernameKey);
+        if (!rawResolvedRank) {
+          continue;
+        }
+
+        const resolvedRank = normalizeSyncedRank(rawResolvedRank);
         if (!resolvedRank) {
           continue;
         }
@@ -461,6 +583,19 @@ export default function PersonnelPage() {
     }
   };
 
+  const rosterAliases = new Set(
+    rosterRows
+      .map((entry) => normalizeName(entry.profile?.roblox_username || entry.callsign || ''))
+      .filter(Boolean)
+  );
+
+  const assignablePersonnelRows = personnelDirectoryRows
+    .filter((entry) => {
+      const key = normalizeName(entry.roblox_username);
+      return Boolean(key) && !rosterAliases.has(key);
+    })
+    .sort((left, right) => left.roblox_username.localeCompare(right.roblox_username));
+
   return (
     <section className="space-y-6">
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
@@ -480,17 +615,7 @@ export default function PersonnelPage() {
 
       {isStaff && (
         <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
-          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Personnel Management</div>
-            <button
-              type="button"
-              onClick={() => void syncRanksFromRobloxGroup()}
-              disabled={syncingRanks}
-              className="rounded border border-slateBlue/70 px-3 py-2 text-xs uppercase tracking-[0.3em] text-slate-300 disabled:opacity-60"
-            >
-              {syncingRanks ? 'Syncing Group Ranks...' : 'Sync Ranks from Roblox Group'}
-            </button>
-          </div>
+          <div className="mb-4 text-[10px] uppercase tracking-[0.35em] text-slate-400">Personnel Management</div>
           {syncError && <p className="mb-4 text-sm text-red-400">{syncError}</p>}
           {syncSummary && (
             <div className="mb-4 rounded border border-slateBlue/60 bg-[#0d121b] p-3 text-sm text-slate-300">
@@ -507,14 +632,24 @@ export default function PersonnelPage() {
               )}
             </div>
           )}
-          <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">Assign Unit and Rank</h3>
+          <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">Assign Unit</h3>
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={() => void syncRanksFromRobloxGroup()}
+              disabled={syncingRanks}
+              className="rounded border border-slateBlue/70 px-3 py-2 text-xs uppercase tracking-[0.3em] text-slate-300 disabled:opacity-60"
+            >
+              {syncingRanks ? 'Syncing Group Ranks...' : 'Sync Ranks from Roblox Group'}
+            </button>
+          </div>
           <div className="mt-4 space-y-3">
             {rosterRows.map((entry) => {
               const displayName = entry.profile?.roblox_username || entry.callsign || entry.profile?.discord_username || entry.profile_id;
               const busy = activeProfileId === entry.profile_id;
 
               return (
-                <div key={entry.profile_id} className="grid gap-2 rounded border border-slateBlue/60 p-3 lg:grid-cols-[1.4fr_1fr_1fr]">
+                <div key={entry.profile_id} className="grid gap-2 rounded border border-slateBlue/60 p-3 lg:grid-cols-[1.4fr_1fr]">
                   <div className="text-sm font-semibold text-silver">{displayName}</div>
                   <label className="text-xs text-slate-400">
                     Unit
@@ -524,28 +659,43 @@ export default function PersonnelPage() {
                       disabled={busy}
                       className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
                     >
+                      <option value="Unassigned">Unassigned</option>
                       <option value="Battery Command">Battery Command</option>
                       <option value="82nd Pirkland">82nd Pirkland</option>
                       <option value="87th Melrose">87th Melrose</option>
                     </select>
                   </label>
-                  <label className="text-xs text-slate-400">
-                    Rank
-                    <input
-                      value={entry.rank || ''}
-                      onChange={(event) => setRosterRows((previous) => previous.map((row) => row.profile_id === entry.profile_id ? { ...row, rank: event.target.value } : row))}
-                      onBlur={(event) => {
-                        const value = event.target.value.trim() || 'SSGT';
-                        if (value !== entry.rank) {
-                          void updateRosterField(entry, { rank: value });
-                        }
-                      }}
-                      className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
-                    />
-                  </label>
                 </div>
               );
             })}
+
+            {assignablePersonnelRows.length > 0 && (
+              <div className="mt-6 space-y-3">
+                <div className="text-xs uppercase tracking-[0.3em] text-slate-400">Battle-derived Personnel Unit Assignment</div>
+                {assignablePersonnelRows.map((entry) => {
+                  const busy = activePersonnelUsername === entry.roblox_username;
+                  return (
+                    <div key={entry.roblox_username} className="grid gap-2 rounded border border-slateBlue/60 p-3 lg:grid-cols-[1.4fr_1fr]">
+                      <div className="text-sm font-semibold text-silver">{entry.roblox_username}</div>
+                      <label className="text-xs text-slate-400">
+                        Unit
+                        <select
+                          value={entry.unit || 'Unassigned'}
+                          onChange={(event) => void updatePersonnelUnit(entry, event.target.value)}
+                          disabled={busy}
+                          className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
+                        >
+                          <option value="Unassigned">Unassigned</option>
+                          <option value="Battery Command">Battery Command</option>
+                          <option value="82nd Pirkland">82nd Pirkland</option>
+                          <option value="87th Melrose">87th Melrose</option>
+                        </select>
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
