@@ -20,6 +20,7 @@ type BulkSyncResponse = {
 
 type SyncSummary = {
   totalRosterRows: number;
+  totalPersonnelRows: number;
   rowsWithUsableUsername: number;
   uniqueUsernamesChecked: number;
   usernamesResolved: number;
@@ -254,12 +255,27 @@ export default function PersonnelPage() {
         }))
         .filter((item) => item.username.length > 0);
 
-      const usernames = rowsWithUsernames.map((item) => item.username);
-      const uniqueUsernames = Array.from(new Set(usernames.map((username) => username.toLowerCase())));
+      const personnelUsernames = rows
+        .map((row) => {
+          const separator = ' - ';
+          const separatorIndex = row.combinedName.indexOf(separator);
+          if (separatorIndex === -1) {
+            return '';
+          }
+          return row.combinedName.slice(separatorIndex + separator.length).trim();
+        })
+        .filter(Boolean);
+
+      const candidateUsernames = [
+        ...rowsWithUsernames.map((item) => item.username),
+        ...personnelUsernames
+      ];
+      const uniqueUsernames = Array.from(new Set(candidateUsernames.map((username) => username.toLowerCase())));
 
       if (uniqueUsernames.length === 0) {
         setSyncSummary({
           totalRosterRows: rosterRows.length,
+          totalPersonnelRows: rows.length,
           rowsWithUsableUsername: 0,
           uniqueUsernamesChecked: 0,
           usernamesResolved: 0,
@@ -324,6 +340,7 @@ export default function PersonnelPage() {
 
       setSyncSummary({
         totalRosterRows: rosterRows.length,
+        totalPersonnelRows: rows.length,
         rowsWithUsableUsername: rowsWithUsernames.length,
         uniqueUsernamesChecked: uniqueUsernames.length,
         usernamesResolved: syncPayload?.usernamesResolved || 0,
@@ -381,7 +398,7 @@ export default function PersonnelPage() {
                 Synced {syncSummary.ranksUpdated} roster ranks. Unchanged: {syncSummary.ranksUnchanged}. Resolved usernames: {syncSummary.usernamesResolved} of {syncSummary.uniqueUsernamesChecked}.
               </p>
               <p className="mt-1">
-                Missing usernames: {syncSummary.skippedMissingUsername}. Failed role lookups: {syncSummary.roleLookupFailures.length}. Failed updates: {syncSummary.failedProfileUpdates.length}.
+                Roster rows: {syncSummary.totalRosterRows}. Personnel rows: {syncSummary.totalPersonnelRows}. Missing usernames: {syncSummary.skippedMissingUsername}. Failed role lookups: {syncSummary.roleLookupFailures.length}. Failed updates: {syncSummary.failedProfileUpdates.length}.
               </p>
               {syncSummary.usernamesUnresolved.length > 0 && (
                 <p className="mt-1 text-amber-300">
