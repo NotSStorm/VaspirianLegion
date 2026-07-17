@@ -23,9 +23,17 @@ type LeaderEntry = {
   kills: number;
   deaths: number;
   assists: number;
+  events: number;
 };
 
-type Metric = 'kills' | 'deaths' | 'assists';
+type Metric = 'kills' | 'deaths' | 'assists' | 'events';
+
+const metricLabels: Record<Metric, string> = {
+  kills: 'Kills',
+  deaths: 'Deaths',
+  assists: 'Assists',
+  events: 'Events Attended'
+};
 
 export default function LeaderboardPage() {
   const [logs, setLogs] = useState<StatLog[]>([]);
@@ -89,7 +97,7 @@ export default function LeaderboardPage() {
   }, []);
 
   const aggregateByCutoff = (cutoff: Date | null) => {
-    const map = new Map<string, LeaderEntry>();
+    const map = new Map<string, LeaderEntry & { battleIds: Set<string> }>();
     logs.forEach((log) => {
       const date = resolveLogDate(log);
       if (!date || (cutoff && date < cutoff)) {
@@ -102,16 +110,22 @@ export default function LeaderboardPage() {
         unit: log.unit,
         kills: 0,
         deaths: 0,
-        assists: 0
+        assists: 0,
+        events: 0,
+        battleIds: new Set<string>()
       };
 
       existing.kills += Number(log.kills) || 0;
       existing.deaths += Number(log.deaths) || 0;
       existing.assists += Number(log.assists) || 0;
+      existing.battleIds.add(log.battle_id);
       map.set(key, existing);
     });
 
-    return Array.from(map.values());
+    return Array.from(map.values()).map(({ battleIds, ...entry }) => ({
+      ...entry,
+      events: battleIds.size
+    }));
   };
 
   const aggregate = (period: 'weekly' | 'monthly') => {
@@ -163,11 +177,12 @@ export default function LeaderboardPage() {
           <button type="button" onClick={() => setMetric('kills')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${metric === 'kills' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Kills</button>
           <button type="button" onClick={() => setMetric('deaths')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${metric === 'deaths' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Deaths</button>
           <button type="button" onClick={() => setMetric('assists')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${metric === 'assists' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Assists</button>
+          <button type="button" onClick={() => setMetric('events')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${metric === 'events' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Events Attended</button>
         </div>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        {renderBoard(`Weekly ${metric[0].toUpperCase()}${metric.slice(1)}`, weekly)}
-        {renderBoard(`Monthly ${metric[0].toUpperCase()}${metric.slice(1)}`, monthly)}
+        {renderBoard(`Weekly ${metricLabels[metric]}`, weekly)}
+        {renderBoard(`Monthly ${metricLabels[metric]}`, monthly)}
       </div>
     </section>
   );

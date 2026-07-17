@@ -227,6 +227,8 @@ export default function ProfilePage() {
     assists: accumulator.assists + (Number(entry.assists) || 0)
   }), { kills: 0, deaths: 0, assists: 0 }), [logs]);
 
+  const careerEventsAttended = useMemo(() => new Set(logs.map((entry) => entry.battle_id).filter(Boolean)).size, [logs]);
+
   const peakStats = useMemo<PeakStat[]>(() => {
     const withBattleContext = logs.map((entry) => {
       const battle = battlesById.get(entry.battle_id);
@@ -308,6 +310,10 @@ export default function ProfilePage() {
               <div className="rounded border border-slateBlue/70 bg-[#141a24] p-5">
                 <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Career Assists</div>
                 <div className="mt-2 font-mono text-3xl font-semibold text-silver">{careerTotals.assists}</div>
+              </div>
+              <div className="rounded border border-slateBlue/70 bg-[#141a24] p-5">
+                <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Career Events Attended</div>
+                <div className="mt-2 font-mono text-3xl font-semibold text-silver">{careerEventsAttended}</div>
               </div>
             </div>
           </div>

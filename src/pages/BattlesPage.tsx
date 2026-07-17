@@ -26,6 +26,14 @@ type BattleStatLog = {
   assists: number;
 };
 
+type ParsedBattleLogInput = {
+  participant_name: string;
+  kills: number;
+  deaths: number;
+  assists: number;
+  unit: string;
+};
+
 export default function BattlesPage() {
   const [battles, setBattles] = useState<Battle[]>([]);
   const [logs, setLogs] = useState<BattleStatLog[]>([]);
@@ -34,6 +42,7 @@ export default function BattlesPage() {
   const [selectedBattleId, setSelectedBattleId] = useState<string>('');
   const [expandedBattleId, setExpandedBattleId] = useState<string>('');
   const [logText, setLogText] = useState('');
+  const [battleLogText, setBattleLogText] = useState('');
   const [pendingBattleDeleteId, setPendingBattleDeleteId] = useState<string | null>(null);
   const [pendingLogDeleteId, setPendingLogDeleteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -137,6 +146,57 @@ export default function BattlesPage() {
     return unitByName[normalized] || 'Unassigned';
   };
 
+  const parseBattleLogLine = (line: string): ParsedBattleLogInput | null => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const rawParts = trimmed.includes('\t')
+      ? trimmed.split('\t')
+      : trimmed.split(',');
+    const parts = rawParts.map((part) => part.trim()).filter((part, index) => part || index === 0);
+    const participantName = parts[0] || '';
+
+    if (!participantName) {
+      return null;
+    }
+
+    return {
+      participant_name: participantName,
+      kills: Number(parts[1]) || 0,
+      deaths: Number(parts[2]) || 0,
+      assists: Number(parts[3]) || 0,
+      unit: inferUnit(participantName)
+    };
+  };
+
+  const parseBattleLogText = (text: string) => text
+    .split(/\r?\n/)
+    .map((line) => parseBattleLogLine(line))
+    .filter((entry): entry is ParsedBattleLogInput => Boolean(entry));
+
+  const insertBattleLogs = async (battleId: string, entries: ParsedBattleLogInput[]) => {
+    if (entries.length === 0) {
+      return;
+    }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    const payload = entries.map((entry) => ({
+      battle_id: battleId,
+      participant_name: entry.participant_name,
+      unit: entry.unit,
+      kills: entry.kills,
+      deaths: entry.deaths,
+      assists: entry.assists,
+      created_by: session?.user?.id || null,
+      updated_at: new Date().toISOString()
+    }));
+
+    const { error: insertError } = await supabase.from('battle_stat_logs').insert(payload);
+    if (insertError) throw insertError;
+  };
+
   const syncBattleDerivedFields = async (battleId: string) => {
     const { data, error: queryError } = await supabase
       .from('battle_stat_logs')
@@ -163,6 +223,9 @@ export default function BattlesPage() {
     setError(null);
     try {
       const parsedDate = new Date(formState.date);
+      const draftBattleLogs = !formState.id
+        ? parseBattleLogText(battleLogText).filter((entry) => !(entry.participant_name.toLowerCase() === 'name' && entry.kills === 0 && entry.deaths === 0 && entry.assists === 0))
+        : [];
       const payload = {
         name: formState.name,
         classification: formState.classification,
@@ -171,6 +234,8 @@ export default function BattlesPage() {
         commanding_officer: formState.commandingOfficer,
         personnel_count: formState.id
           ? (personnelCountByBattle.get(formState.id) || 0)
+          : draftBattleLogs.length > 0
+            ? new Set(draftBattleLogs.map((entry) => entry.participant_name.trim().toLowerCase())).size
           : 0,
         start_date: formState.date,
         threat_level: Number(formState.pointsScored) || 0,
@@ -181,11 +246,21 @@ export default function BattlesPage() {
         const { error: updateError } = await supabase.from('battles').update(payload).eq('id', formState.id);
         if (updateError) throw updateError;
       } else {
-        const { error: insertError } = await supabase.from('battles').insert(payload);
+        const { data: insertedBattle, error: insertError } = await supabase
+          .from('battles')
+          .insert(payload)
+          .select('id')
+          .single();
         if (insertError) throw insertError;
+
+        if (insertedBattle?.id && draftBattleLogs.length > 0) {
+          await insertBattleLogs(insertedBattle.id, draftBattleLogs);
+          await syncBattleDerivedFields(insertedBattle.id);
+        }
       }
 
       setFormState(defaultFormState);
+      setBattleLogText('');
       await loadBattles();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Unable to save battle.');
@@ -271,11 +346,8 @@ export default function BattlesPage() {
       return;
     }
 
-    const lines = logText
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .filter((line) => !/^name\s+k\s+d\s+a$/i.test(line.replace(/\t+/g, ' ')));
+    const lines = parseBattleLogText(logText)
+      .filter((entry) => entry.participant_name && !(entry.participant_name.toLowerCase() === 'name' && entry.kills === 0 && entry.deaths === 0 && entry.assists === 0));
 
     if (lines.length === 0) {
       return;
@@ -284,37 +356,7 @@ export default function BattlesPage() {
     setError(null);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const payload = lines
-        .map((line) => {
-          const parts = line.includes('\t')
-            ? line.split('\t')
-            : line.split(',').map((value) => value.trim());
-
-          if (parts.length < 4) {
-            return null;
-          }
-
-          const [participantName, kills, deaths, assists] = parts;
-          return {
-            battle_id: selectedBattleId,
-            participant_name: String(participantName).trim(),
-            unit: inferUnit(String(participantName).trim()),
-            kills: Number(kills) || 0,
-            deaths: Number(deaths) || 0,
-            assists: Number(assists) || 0,
-            created_by: session?.user?.id || null,
-            updated_at: new Date().toISOString()
-          };
-        })
-        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
-
-      if (payload.length === 0) {
-        return;
-      }
-
-      const { error: insertError } = await supabase.from('battle_stat_logs').insert(payload);
-      if (insertError) throw insertError;
+      await insertBattleLogs(selectedBattleId, lines);
 
       await syncBattleDerivedFields(selectedBattleId);
 
@@ -451,9 +493,13 @@ export default function BattlesPage() {
                   <input type="number" min={0} value={formState.pointsScored} onChange={(event) => setFormState((prev) => ({ ...prev, pointsScored: Number(event.target.value) }))} placeholder="Points scored" className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
                 </label>
               </div>
-              <label className="text-xs text-slate-400">Battle Notes
-                <textarea value={formState.description} onChange={(event) => setFormState((prev) => ({ ...prev, description: event.target.value }))} placeholder="Battle description / notes" className="mt-1 min-h-[90px] w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
-              </label>
+              {!formState.id ? (
+                <label className="text-xs text-slate-400">Battle Logs
+                  <textarea value={battleLogText} onChange={(event) => setBattleLogText(event.target.value)} placeholder="Name\tK\tD\tA\nName only is also accepted" className="mt-1 min-h-[120px] w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+                </label>
+              ) : (
+                <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Use the log import panel to add or edit battle logs for an existing battle.</p>
+              )}
               <button type="button" onClick={() => void saveBattle()} className="rounded border border-silver/50 bg-silver px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slateBlue">{formState.id ? 'Update Battle' : 'Create Battle'}</button>
             </div>
           </div>
