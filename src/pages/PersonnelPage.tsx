@@ -73,6 +73,26 @@ type PersonnelRow = {
   medals: string[];
 };
 
+type PersonnelSourceRow = PersonnelRow & {
+  key: string;
+  priority: number;
+};
+
+type BattleLogParticipant = {
+  participant_name: string;
+  unit: string;
+};
+
+type ProfileRecord = {
+  id: string;
+  rank?: string | null;
+  company?: string | null;
+  roblox_username?: string | null;
+  roblox_id?: string | null;
+  discord_username?: string | null;
+  callsign?: string | null;
+};
+
 type RosterRecord = {
   id?: string;
   profile_id: string;
@@ -82,6 +102,7 @@ type RosterRecord = {
     roblox_username?: string | null;
     roblox_id?: string | null;
     discord_username?: string | null;
+    callsign?: string | null;
   } | null;
 };
 
@@ -94,6 +115,12 @@ export default function PersonnelPage() {
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
   const [syncingRanks, setSyncingRanks] = useState(false);
 
+  const normalizeName = (value?: string | null) => String(value || '').trim().replace(/[_\s]+/g, '').toLowerCase();
+
+  const collectAliases = (values: Array<string | null | undefined>) => values
+    .map((value) => normalizeName(value))
+    .filter(Boolean);
+
   const loadPersonnel = async () => {
     setLoading(true);
 
@@ -103,12 +130,21 @@ export default function PersonnelPage() {
 
       const { data: rosterData, error: rosterError } = await supabase
         .from('roster')
-        .select('id, profile_id, rank, company, profile:profiles!roster_profile_id_fkey(roblox_username, roblox_id, discord_username)')
+        .select('id, profile_id, rank, company, profile:profiles!roster_profile_id_fkey(roblox_username, roblox_id, discord_username, callsign)')
         .order('created_at', { ascending: true });
 
       if (rosterError) {
         throw rosterError;
       }
+
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('id, rank, company, roblox_username, roblox_id, discord_username, callsign');
+
+      const { data: battleLogData } = await supabase
+        .from('battle_stat_logs')
+        .select('participant_name, unit, created_at')
+        .order('created_at', { ascending: false });
 
       const profileIds = (rosterData || []).map((entry: any) => entry.profile_id);
       const { data: medalData } = await supabase
@@ -126,22 +162,77 @@ export default function PersonnelPage() {
         medalsByProfile.set(recipientProfileId, [...existing, String(medal.medal_name)]);
       });
 
-      const resolvedRows = await Promise.all(
-        ((rosterData || []) as RosterRecord[]).map(async (entry) => {
+      const profileAliases = new Map<string, ProfileRecord>();
+      ((profileData || []) as ProfileRecord[]).forEach((profile) => {
+        collectAliases([profile.roblox_username, profile.discord_username, profile.callsign]).forEach((alias) => {
+          profileAliases.set(alias, profile);
+        });
+      });
+
+      const rosterRecords = (rosterData || []) as RosterRecord[];
+
+      const battleParticipants = new Map<string, BattleLogParticipant>();
+      ((battleLogData || []) as BattleLogParticipant[]).forEach((entry) => {
+        const participantName = String(entry.participant_name || '').trim();
+        const normalized = normalizeName(participantName);
+        if (!participantName || battleParticipants.has(normalized)) {
+          return;
+        }
+
+        battleParticipants.set(normalized, {
+          participant_name: participantName,
+          unit: entry.unit || 'Unassigned'
+        });
+      });
+
+      const rosterRowsResolved = await Promise.all(
+        rosterRecords.map(async (entry) => {
           const robloxName = entry.profile?.roblox_username || entry.profile?.discord_username || 'Unknown';
           const groupRank = await resolveGroupRank(entry.profile?.roblox_id, entry.profile?.roblox_username, entry.rank || 'Unranked');
 
           return {
+            key: `profile:${entry.profile_id}`,
+            priority: 2,
             combinedName: `${groupRank} - ${robloxName}`,
             unit: entry.company || 'Unassigned',
             groupRank,
             medals: medalsByProfile.get(entry.profile_id) || []
-          };
+          } as PersonnelSourceRow;
         })
       );
 
-      setRows(resolvedRows);
-      setRosterRows((rosterData || []) as RosterRecord[]);
+      const battleRowsResolved = await Promise.all(
+        Array.from(battleParticipants.values()).map(async (entry) => {
+          const normalized = normalizeName(entry.participant_name);
+          const matchedProfile = profileAliases.get(normalized) || null;
+          const groupRank = await resolveGroupRank(
+            matchedProfile?.roblox_id || null,
+            matchedProfile?.roblox_username || entry.participant_name,
+            matchedProfile?.rank || 'Unranked'
+          );
+
+          return {
+            key: matchedProfile ? `profile:${matchedProfile.id}` : `battle:${normalized}`,
+            priority: matchedProfile ? 1 : 0,
+            combinedName: `${groupRank} - ${entry.participant_name}`,
+            unit: entry.unit || matchedProfile?.company || 'Unassigned',
+            groupRank,
+            medals: matchedProfile ? (medalsByProfile.get(matchedProfile.id) || []) : []
+          } as PersonnelSourceRow;
+        })
+      );
+
+      const mergedRows = new Map<string, PersonnelSourceRow>();
+
+      [...battleRowsResolved, ...rosterRowsResolved].forEach((row) => {
+        const existing = mergedRows.get(row.key);
+        if (!existing || row.priority > existing.priority) {
+          mergedRows.set(row.key, row);
+        }
+      });
+
+      setRows(Array.from(mergedRows.values()).map(({ key, priority, ...row }) => row));
+      setRosterRows(rosterRecords);
     } catch (error) {
       console.error('Personnel roster load failed', error);
       setRows([]);
