@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import AssignmentSelect from '../components/shared/AssignmentSelect';
+import PersonnelManagementPanel from '../components/shared/PersonnelManagementPanel';
 import PersonnelTable from '../components/shared/PersonnelTable';
 import { getAuthenticatedState } from '../lib/auth';
 import { fetchExcludedPersonnelNames, normalizePersonnelName } from '../lib/personnel';
@@ -686,6 +687,8 @@ export default function PersonnelPage() {
         <div className="mb-4 text-[10px] uppercase tracking-[0.35em] text-slate-400">Command</div>
         {loading ? <p className="text-sm text-slate-400">Loading accepted personnel...</p> : <PersonnelTable rows={visibleRows} />}
       </div>
+
+      {isStaff && <PersonnelManagementPanel onChanged={() => loadPersonnel()} />}
 
       {isStaff && (
         <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
