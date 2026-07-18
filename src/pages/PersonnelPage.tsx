@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import AssignmentSelect from '../components/shared/AssignmentSelect';
 import PersonnelManagementPanel from '../components/shared/PersonnelManagementPanel';
 import PersonnelTable from '../components/shared/PersonnelTable';
 import { getAuthenticatedState } from '../lib/auth';
@@ -77,6 +76,9 @@ type SyncSummary = {
 
 
 type PersonnelRow = {
+  key: string;
+  profileId: string | null;
+  username: string;
   combinedName: string;
   unit: string;
   groupRank: string;
@@ -129,12 +131,11 @@ export default function PersonnelPage() {
   const [rosterRows, setRosterRows] = useState<RosterRecord[]>([]);
   const [isStaff, setIsStaff] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
-  const [activePersonnelUsername, setActivePersonnelUsername] = useState<string | null>(null);
   const [syncingRanks, setSyncingRanks] = useState(false);
   const [syncSummary, setSyncSummary] = useState<SyncSummary | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [personnelDirectoryRows, setPersonnelDirectoryRows] = useState<PersonnelDirectoryRecord[]>([]);
+  const [activeUnitKey, setActiveUnitKey] = useState<string | null>(null);
 
   const normalizeName = (value?: string | null) => normalizePersonnelName(value);
 
@@ -301,6 +302,8 @@ export default function PersonnelPage() {
           return {
             key: `profile:${entry.profile_id}`,
             priority: 2,
+            profileId: entry.profile_id,
+            username: String(robloxName),
             combinedName: `${groupRank} - ${robloxName}`,
             unit: entry.company || 'Unassigned',
             groupRank,
@@ -323,6 +326,8 @@ export default function PersonnelPage() {
           return {
             key: matchedProfile ? `profile:${matchedProfile.id}` : `battle:${normalized}`,
             priority: matchedProfile ? 1 : 0,
+            profileId: matchedProfile?.id || null,
+            username: String(entry.participant_name),
             combinedName: `${groupRank} - ${entry.participant_name}`,
             unit: matchedProfile?.company || directoryMatch?.unit || entry.unit || 'Unassigned',
             groupRank,
@@ -345,7 +350,7 @@ export default function PersonnelPage() {
 
       setRows(
         Array.from(mergedRows.values())
-          .map(({ key, priority, ...row }) => row)
+          .map((row) => row)
           .sort((left, right) => {
             const rankDelta = getRankSortWeight(right.groupRank) - getRankSortWeight(left.groupRank);
             if (rankDelta !== 0) {
@@ -372,62 +377,43 @@ export default function PersonnelPage() {
   }, []);
 
   const visibleRows = useMemo(
-    () => rows.filter((row) => [row.combinedName, row.unit, row.groupRank, row.medals.join(' ')].join(' ').toLowerCase().includes(query.toLowerCase())),
+    () => rows.filter((row) => [row.combinedName, row.username, row.unit, row.groupRank, row.medals.join(' ')].join(' ').toLowerCase().includes(query.toLowerCase())),
     [query, rows]
   );
 
-  const updateRosterField = async (entry: RosterRecord, patch: Partial<RosterRecord>) => {
-    setActiveProfileId(entry.profile_id);
-    try {
-      const { error } = await supabase
-        .from('roster')
-        .update({
-          company: patch.company === undefined ? entry.company : patch.company,
-          rank: patch.rank === undefined ? entry.rank : patch.rank
-        })
-        .eq('profile_id', entry.profile_id);
+  const unitOptions = [
+    { value: 'Unassigned', label: 'Unassigned' },
+    { value: 'Battery Command', label: 'Battery Command' },
+    { value: '82nd Pirkland', label: '82nd Pirkland' },
+    { value: '87th Melrose', label: '87th Melrose' }
+  ];
 
-      if (error) {
-        throw error;
-      }
-
-      setRosterRows((previous) => previous.map((row) => (
-        row.profile_id === entry.profile_id ? { ...row, ...patch } : row
-      )));
-    } catch (updateError) {
-      console.error('Roster update failed', updateError);
-    } finally {
-      setActiveProfileId(null);
-    }
-  };
-
-  const updatePersonnelUnit = async (entry: PersonnelDirectoryRecord, nextUnit: string) => {
+  const updateVisibleRowUnit = async (row: PersonnelRow, nextUnit: string) => {
     const normalizedUnit = String(nextUnit || '').trim() || 'Unassigned';
-    setActivePersonnelUsername(entry.roblox_username);
+    setActiveUnitKey(row.key);
 
     try {
-      const { error } = await supabase
-        .from('personnel')
-        .update({
-          unit: normalizedUnit,
-          updated_at: new Date().toISOString()
-        })
-        .eq('roblox_username', entry.roblox_username);
-
-      if (error) {
-        throw error;
+      if (row.profileId) {
+        await supabase.from('profiles').update({ company: normalizedUnit }).eq('id', row.profileId);
+        await supabase.from('roster').update({ company: normalizedUnit }).eq('profile_id', row.profileId);
       }
 
-      setPersonnelDirectoryRows((previous) => previous.map((row) => (
-        normalizeName(row.roblox_username) === normalizeName(entry.roblox_username)
-          ? { ...row, unit: normalizedUnit }
-          : row
-      )));
+      if (row.username) {
+        await supabase
+          .from('personnel')
+          .upsert({
+            roblox_username: row.username,
+            unit: normalizedUnit,
+            rank: row.groupRank || 'Unranked',
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'roblox_username' });
+      }
+
       await loadPersonnel();
     } catch (updateError) {
-      console.error('Personnel unit update failed', updateError);
+      console.error('Inline unit update failed', updateError);
     } finally {
-      setActivePersonnelUsername(null);
+      setActiveUnitKey(null);
     }
   };
 
@@ -639,26 +625,6 @@ export default function PersonnelPage() {
     }
   };
 
-  const rosterAliases = new Set(
-    rosterRows
-      .map((entry) => normalizeName(entry.profile?.roblox_username || entry.callsign || ''))
-      .filter(Boolean)
-  );
-
-  const assignablePersonnelRows = personnelDirectoryRows
-    .filter((entry) => {
-      const key = normalizeName(entry.roblox_username);
-      return Boolean(key) && !rosterAliases.has(key) && isRosterEligibleRank(entry.rank);
-    })
-    .sort((left, right) => left.roblox_username.localeCompare(right.roblox_username));
-
-  const unitOptions = [
-    { value: 'Unassigned', label: 'Unassigned' },
-    { value: 'Battery Command', label: 'Battery Command' },
-    { value: '82nd Pirkland', label: '82nd Pirkland' },
-    { value: '87th Melrose', label: '87th Melrose' }
-  ];
-
   return (
     <section className="space-y-6">
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
@@ -681,83 +647,28 @@ export default function PersonnelPage() {
             )}
           </div>
         </div>
+        {syncError && <p className="mt-4 text-sm text-red-400">{syncError}</p>}
+        {syncSummary && (
+          <div className="mt-4 rounded border border-slateBlue/60 bg-[#0d121b] p-3 text-sm text-slate-300">
+            Synced {syncSummary.rosterRanksUpdated} roster ranks and {syncSummary.personnelRanksUpdated} personnel ranks. Resolved usernames: {syncSummary.usernamesResolved} of {syncSummary.uniqueUsernamesChecked}.
+          </div>
+        )}
       </div>
 
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
         <div className="mb-4 text-[10px] uppercase tracking-[0.35em] text-slate-400">Command</div>
-        {loading ? <p className="text-sm text-slate-400">Loading accepted personnel...</p> : <PersonnelTable rows={visibleRows} />}
+        {loading ? <p className="text-sm text-slate-400">Loading accepted personnel...</p> : (
+          <PersonnelTable
+            rows={visibleRows}
+            editableUnits={isStaff}
+            unitOptions={unitOptions}
+            updatingUnitKey={activeUnitKey}
+            onUnitChange={(row, unit) => void updateVisibleRowUnit(row as PersonnelRow, unit)}
+          />
+        )}
       </div>
 
       {isStaff && <PersonnelManagementPanel onChanged={() => loadPersonnel()} />}
-
-      {isStaff && (
-        <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
-          <div className="mb-4 text-[10px] uppercase tracking-[0.35em] text-slate-400">Personnel Management</div>
-          {syncError && <p className="mb-4 text-sm text-red-400">{syncError}</p>}
-          {syncSummary && (
-            <div className="mb-4 rounded border border-slateBlue/60 bg-[#0d121b] p-3 text-sm text-slate-300">
-              <p>
-                Synced {syncSummary.rosterRanksUpdated} roster ranks and {syncSummary.personnelRanksUpdated} personnel ranks. Unchanged: roster {syncSummary.rosterRanksUnchanged}, personnel {syncSummary.personnelRanksUnchanged}. Resolved usernames: {syncSummary.usernamesResolved} of {syncSummary.uniqueUsernamesChecked}.
-              </p>
-              <p className="mt-1">
-                Roster rows: {syncSummary.totalRosterRows}. Personnel rows: {syncSummary.totalPersonnelRows}. Personnel directory rows: {syncSummary.totalPersonnelDirectoryRows}. Missing usernames: {syncSummary.skippedMissingUsername}. Failed role lookups: {syncSummary.roleLookupFailures.length}. Failed updates: roster {syncSummary.failedProfileUpdates.length}, personnel {syncSummary.failedPersonnelUpdates.length}.
-              </p>
-              {syncSummary.usernamesUnresolved.length > 0 && (
-                <p className="mt-1 text-amber-300">
-                  Could not resolve usernames: {syncSummary.usernamesUnresolved.slice(0, 10).join(', ')}{syncSummary.usernamesUnresolved.length > 10 ? '...' : ''}
-                </p>
-              )}
-            </div>
-          )}
-          <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">Assign Unit</h3>
-          <div className="mt-4 space-y-3">
-            {rosterRows.map((entry) => {
-              const displayName = entry.profile?.roblox_username || entry.callsign || entry.profile?.discord_username || entry.profile_id;
-              const busy = activeProfileId === entry.profile_id;
-
-              return (
-                <div key={entry.profile_id} className="grid gap-2 rounded border border-slateBlue/60 p-3 lg:grid-cols-[1.4fr_1fr]">
-                  <div className="text-sm font-semibold text-silver">{displayName}</div>
-                  <label className="text-xs text-slate-400">
-                    Unit
-                    <AssignmentSelect
-                      value={entry.company || ''}
-                      onChange={(nextUnit) => void updateRosterField(entry, { company: nextUnit })}
-                      disabled={busy}
-                      options={unitOptions}
-                      className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
-                    />
-                  </label>
-                </div>
-              );
-            })}
-
-            {assignablePersonnelRows.length > 0 && (
-              <div className="mt-6 space-y-3">
-                <div className="text-xs uppercase tracking-[0.3em] text-slate-400">Battle-derived Personnel Unit Assignment</div>
-                {assignablePersonnelRows.map((entry) => {
-                  const busy = activePersonnelUsername === entry.roblox_username;
-                  return (
-                    <div key={entry.roblox_username} className="grid gap-2 rounded border border-slateBlue/60 p-3 lg:grid-cols-[1.4fr_1fr]">
-                      <div className="text-sm font-semibold text-silver">{entry.roblox_username}</div>
-                      <label className="text-xs text-slate-400">
-                        Unit
-                        <AssignmentSelect
-                          value={entry.unit || 'Unassigned'}
-                          onChange={(nextUnit) => void updatePersonnelUnit(entry, nextUnit)}
-                          disabled={busy}
-                          options={unitOptions}
-                          className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
-                        />
-                      </label>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </section>
   );
 }

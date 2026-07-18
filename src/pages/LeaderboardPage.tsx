@@ -163,9 +163,6 @@ export default function LeaderboardPage() {
             <div className="text-slate-300">{index + 1}. {entry.name} <span className="text-slate-500">({entry.unit})</span></div>
             <div className="text-right">
               <div className="text-silver">{metric.toUpperCase()} {entry[metric]}</div>
-              <div className="mt-1 text-[10px] uppercase tracking-[0.25em] text-slate-400">
-                K {entry.kills} · D {entry.deaths} · A {entry.assists}
-              </div>
             </div>
           </div>
         ))}

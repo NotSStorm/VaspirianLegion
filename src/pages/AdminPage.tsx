@@ -24,6 +24,16 @@ type ProfileRecord = {
   callsign?: string | null;
 };
 
+type RosterRecord = {
+  profile_id: string;
+  callsign?: string | null;
+  profile?: {
+    roblox_username?: string | null;
+    discord_username?: string | null;
+    callsign?: string | null;
+  } | null;
+};
+
 function toDisplayName(profile?: ProfileRecord | null) {
   if (!profile) {
     return 'Unknown User';
@@ -45,15 +55,30 @@ function formatDateTime(value?: string | null) {
   return parsed.toLocaleString();
 }
 
+function normalizeProfileAliases(profile: ProfileRecord, aliasesByProfileId: Map<string, string[]>) {
+  const aliases = [
+    profile.roblox_username,
+    profile.callsign,
+    profile.discord_username,
+    ...(aliasesByProfileId.get(profile.id) || [])
+  ]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+
+  return Array.from(new Set(aliases));
+}
+
 export default function AdminPage() {
   const [applications, setApplications] = useState<ApplicationRecord[]>([]);
   const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
+  const [rosterRows, setRosterRows] = useState<RosterRecord[]>([]);
   const [viewerProfileId, setViewerProfileId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [profileQuery, setProfileQuery] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const loadAdminData = async () => {
     setLoading(true);
@@ -63,7 +88,7 @@ export default function AdminPage() {
       const { profile } = await getAuthenticatedState();
       setViewerProfileId(profile?.id || null);
 
-      const [{ data: applicationData, error: applicationError }, { data: profileData, error: profileError }] = await Promise.all([
+      const [{ data: applicationData, error: applicationError }, { data: profileData, error: profileError }, { data: rosterData, error: rosterError }] = await Promise.all([
         supabase
           .from('applications')
           .select('id, profile_id, service_number, callsign, timezone, requested_group_join, status, reviewed_by, reviewed_at, created_at')
@@ -71,19 +96,26 @@ export default function AdminPage() {
         supabase
           .from('profiles')
           .select('id, role, roblox_username, discord_username, callsign')
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('roster')
+          .select('profile_id, callsign, profile:profiles!roster_profile_id_fkey(roblox_username, discord_username, callsign)')
           .order('created_at', { ascending: true })
       ]);
 
       if (applicationError) throw applicationError;
       if (profileError) throw profileError;
+      if (rosterError) throw rosterError;
 
       setApplications((applicationData || []) as ApplicationRecord[]);
       setProfiles((profileData || []) as ProfileRecord[]);
+      setRosterRows((rosterData || []) as RosterRecord[]);
     } catch (loadError) {
       console.error('Unable to load admin data', loadError);
       setError(loadError instanceof Error ? loadError.message : 'Unable to load admin data.');
       setApplications([]);
       setProfiles([]);
+      setRosterRows([]);
     } finally {
       setLoading(false);
     }
@@ -114,6 +146,30 @@ export default function AdminPage() {
     [applications]
   );
 
+  const aliasesByProfileId = useMemo(() => {
+    const map = new Map<string, string[]>();
+
+    rosterRows.forEach((row) => {
+      const profileId = String(row.profile_id || '').trim();
+      if (!profileId) {
+        return;
+      }
+
+      const aliases = [row.callsign, row.profile?.roblox_username, row.profile?.discord_username, row.profile?.callsign]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
+
+      if (aliases.length === 0) {
+        return;
+      }
+
+      const existing = map.get(profileId) || [];
+      map.set(profileId, Array.from(new Set([...existing, ...aliases])));
+    });
+
+    return map;
+  }, [rosterRows]);
+
   const filteredProfiles = useMemo(() => {
     const query = profileQuery.trim().toLowerCase();
     const candidates = profiles.filter((entry) => entry.id !== viewerProfileId);
@@ -121,14 +177,11 @@ export default function AdminPage() {
       return candidates;
     }
 
-    return candidates.filter((entry) => [
-      entry.roblox_username,
-      entry.discord_username,
-      entry.callsign,
-      entry.role,
-      entry.id
-    ].join(' ').toLowerCase().includes(query));
-  }, [profileQuery, profiles, viewerProfileId]);
+    return candidates.filter((entry) => {
+      const aliases = normalizeProfileAliases(entry, aliasesByProfileId);
+      return [...aliases, entry.role, entry.id].join(' ').toLowerCase().includes(query);
+    });
+  }, [aliasesByProfileId, profileQuery, profiles, viewerProfileId]);
 
   const refreshWithMessage = async (message: string) => {
     setSuccess(message);
@@ -193,7 +246,14 @@ export default function AdminPage() {
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
         <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Admin Panel</div>
         <h2 className="mt-2 text-3xl font-semibold uppercase tracking-[0.2em] text-silver">Applicant Review + Admin Assignment</h2>
-        <p className="mt-3 text-sm text-slate-300">Review new applicants, inspect past application outcomes, and assign admin permissions.</p>
+        <p className="mt-3 text-sm text-slate-300">Review new applicants and assign admin permissions.</p>
+        <button
+          type="button"
+          onClick={() => setHistoryOpen((current) => !current)}
+          className="mt-4 rounded border border-slateBlue/70 px-3 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slate-300"
+        >
+          {historyOpen ? 'Hide Application History' : 'View Application History'}
+        </button>
         {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
         {success && <p className="mt-3 text-sm text-emerald-300">{success}</p>}
       </div>
@@ -242,41 +302,47 @@ export default function AdminPage() {
         </div>
       </div>
 
-      <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
-        <div className="mb-4 text-[10px] uppercase tracking-[0.35em] text-slate-400">Past Acceptances</div>
-        {!loading && acceptedApplications.length === 0 && <p className="text-sm text-slate-400">No approved applications yet.</p>}
-        <div className="space-y-3">
-          {acceptedApplications.map((application) => {
-            const applicant = profileById.get(application.profile_id) || null;
-            const reviewer = application.reviewed_by ? (profileById.get(application.reviewed_by) || null) : null;
-            return (
-              <div key={application.id} className="rounded border border-slateBlue/60 bg-[#0d121b] p-4">
-                <div className="text-sm font-semibold text-silver">{application.callsign || toDisplayName(applicant)}</div>
-                <div className="mt-1 text-xs text-slate-400">Applicant: {toDisplayName(applicant)} • Timezone: {application.timezone || 'N/A'}</div>
-                <div className="mt-1 text-xs text-slate-500">Approved {formatDateTime(application.reviewed_at)} by {toDisplayName(reviewer)}</div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {historyOpen && (
+        <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
+          <div className="mb-4 text-[10px] uppercase tracking-[0.35em] text-slate-400">Application History</div>
 
-      <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
-        <div className="mb-4 text-[10px] uppercase tracking-[0.35em] text-slate-400">Past Rejections</div>
-        {!loading && rejectedApplications.length === 0 && <p className="text-sm text-slate-400">No rejected applications.</p>}
-        <div className="space-y-3">
-          {rejectedApplications.map((application) => {
-            const applicant = profileById.get(application.profile_id) || null;
-            const reviewer = application.reviewed_by ? (profileById.get(application.reviewed_by) || null) : null;
-            return (
-              <div key={application.id} className="rounded border border-slateBlue/60 bg-[#0d121b] p-4">
-                <div className="text-sm font-semibold text-silver">{application.callsign || toDisplayName(applicant)}</div>
-                <div className="mt-1 text-xs text-slate-400">Applicant: {toDisplayName(applicant)} • Timezone: {application.timezone || 'N/A'}</div>
-                <div className="mt-1 text-xs text-slate-500">Rejected {formatDateTime(application.reviewed_at)} by {toDisplayName(reviewer)}</div>
-              </div>
-            );
-          })}
+          <div className="mb-6">
+            <div className="mb-3 text-xs uppercase tracking-[0.3em] text-slate-400">Past Acceptances</div>
+            {!loading && acceptedApplications.length === 0 && <p className="text-sm text-slate-400">No approved applications yet.</p>}
+            <div className="space-y-3">
+              {acceptedApplications.map((application) => {
+                const applicant = profileById.get(application.profile_id) || null;
+                const reviewer = application.reviewed_by ? (profileById.get(application.reviewed_by) || null) : null;
+                return (
+                  <div key={application.id} className="rounded border border-slateBlue/60 bg-[#0d121b] p-4">
+                    <div className="text-sm font-semibold text-silver">{application.callsign || toDisplayName(applicant)}</div>
+                    <div className="mt-1 text-xs text-slate-400">Applicant: {toDisplayName(applicant)} • Timezone: {application.timezone || 'N/A'}</div>
+                    <div className="mt-1 text-xs text-slate-500">Approved {formatDateTime(application.reviewed_at)} by {toDisplayName(reviewer)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-3 text-xs uppercase tracking-[0.3em] text-slate-400">Past Rejections</div>
+            {!loading && rejectedApplications.length === 0 && <p className="text-sm text-slate-400">No rejected applications.</p>}
+            <div className="space-y-3">
+              {rejectedApplications.map((application) => {
+                const applicant = profileById.get(application.profile_id) || null;
+                const reviewer = application.reviewed_by ? (profileById.get(application.reviewed_by) || null) : null;
+                return (
+                  <div key={application.id} className="rounded border border-slateBlue/60 bg-[#0d121b] p-4">
+                    <div className="text-sm font-semibold text-silver">{application.callsign || toDisplayName(applicant)}</div>
+                    <div className="mt-1 text-xs text-slate-400">Applicant: {toDisplayName(applicant)} • Timezone: {application.timezone || 'N/A'}</div>
+                    <div className="mt-1 text-xs text-slate-500">Rejected {formatDateTime(application.reviewed_at)} by {toDisplayName(reviewer)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
         <div className="mb-2 text-[10px] uppercase tracking-[0.35em] text-slate-400">Assign Admin</div>
@@ -295,12 +361,15 @@ export default function AdminPage() {
             const revokeBusy = busyKey === `admin:${profile.id}:revoke`;
             const isBusy = grantBusy || revokeBusy;
             const isAdmin = profile.role === 'admin';
+            const aliases = normalizeProfileAliases(profile, aliasesByProfileId);
+            const displayName = aliases[0] || toDisplayName(profile);
 
             return (
               <div key={profile.id} className="flex flex-col gap-3 rounded border border-slateBlue/60 bg-[#0d121b] p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <div className="text-sm font-semibold text-silver">{toDisplayName(profile)}</div>
+                  <div className="text-sm font-semibold text-silver">{displayName}</div>
                   <div className="text-xs text-slate-400">Role: {profile.role} • ID: {profile.id}</div>
+                  {aliases.length > 1 && <div className="text-xs text-slate-500">Aliases: {aliases.slice(1).join(', ')}</div>}
                 </div>
                 <button
                   type="button"
