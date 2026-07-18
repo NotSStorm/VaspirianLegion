@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Menu, Shield, Sparkles } from 'lucide-react';
+import { Menu, Sparkles } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { getAuthenticatedState } from '../lib/auth';
 import { supabase } from '../lib/supabase';
+import LegionCrest from './shared/LegionCrest';
 import type { Role } from '../types';
 
 const navItems = [
@@ -126,7 +127,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         <div className="flex w-full items-center justify-between px-4 py-4 sm:px-6 lg:px-10 xl:px-14">
           <NavLink to="/" className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-full border border-silver/40 bg-slateBlue/80 shadow-[0_0_18px_rgba(232,236,242,0.25)]">
-              <Shield className="h-6 w-6 text-silver" />
+              <LegionCrest className="h-7 w-7 object-contain" />
             </div>
             <div className="leading-tight">
               {headerUser?.discordUsername && (

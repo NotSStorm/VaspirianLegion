@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { ArrowRight, ShieldCheck } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import LegionCrest from '../components/shared/LegionCrest';
 import { supabase } from '../lib/supabase';
 import { resolvePostAuthPath } from '../lib/auth';
 
@@ -71,7 +72,7 @@ export default function LoginPage() {
       <div className="w-full max-w-2xl rounded border border-slateBlue/70 bg-[#141a24] p-8 shadow-[0_0_30px_rgba(30,58,95,0.18)]">
         <div className="mb-6 flex justify-center">
           <div className="flex h-16 w-16 items-center justify-center rounded-full border border-silver/40 bg-slateBlue/30">
-            <ShieldCheck className="h-8 w-8 text-silver" />
+            <LegionCrest className="h-9 w-9 object-contain" />
           </div>
         </div>
         <div className="text-center text-[10px] uppercase tracking-[0.35em] text-slate-400">Secure Channel</div>

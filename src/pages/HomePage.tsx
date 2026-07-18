@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ArrowRight, Shield } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
+import LegionCrest from '../components/shared/LegionCrest';
 import StatCard from '../components/shared/StatCard';
 import { supabase } from '../lib/supabase';
 
@@ -70,7 +71,7 @@ export default function HomePage() {
         <div className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
           <div className="max-w-2xl">
             <div className="mb-4 inline-flex items-center gap-2 rounded border border-silver/30 bg-slateBlue/30 px-3 py-1 text-[10px] uppercase tracking-[0.35em] text-slate-300">
-              <Shield className="h-3.5 w-3.5" />
+              <LegionCrest className="h-3.5 w-3.5 object-contain" alt="Legion crest" />
               Grand Andouran Battery
             </div>
             <h1 className="text-4xl font-black uppercase leading-[0.95] tracking-[0.25em] text-silver sm:text-6xl">
@@ -86,7 +87,7 @@ export default function HomePage() {
           </div>
           <div className="flex h-72 w-72 items-center justify-center rounded-full border border-silver/20 bg-[radial-gradient(circle,_rgba(232,236,242,0.18),_transparent_70%)] p-8">
             <div className="flex h-56 w-56 items-center justify-center rounded-full border border-silver/40 bg-slateBlue/20 shadow-[0_0_35px_rgba(232,236,242,0.12)]">
-              <Shield className="h-36 w-36 text-silver" />
+              <LegionCrest className="h-36 w-36 object-contain" />
             </div>
           </div>
         </div>

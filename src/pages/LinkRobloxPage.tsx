@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import LegionCrest from '../components/shared/LegionCrest';
 import { supabase } from '../lib/supabase';
 import { getAuthenticatedState, resolvePostAuthPath } from '../lib/auth';
 
@@ -180,7 +180,7 @@ export default function LinkRobloxPage() {
     <section className="flex min-h-[70vh] items-center justify-center">
       <div className="w-full max-w-2xl rounded border border-slateBlue/70 bg-[#141a24] p-8">
         <div className="mb-4 flex justify-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full border border-silver/40 bg-slateBlue/30"><ShieldCheck className="h-6 w-6 text-silver" /></div>
+          <div className="flex h-12 w-12 items-center justify-center rounded-full border border-silver/40 bg-slateBlue/30"><LegionCrest className="h-6 w-6 object-contain" /></div>
         </div>
         <div className="text-center text-[10px] uppercase tracking-[0.35em] text-slate-400">Verification</div>
         <h2 className="mt-2 text-center text-3xl font-semibold uppercase tracking-[0.2em] text-silver">Link Your Roblox Account</h2>

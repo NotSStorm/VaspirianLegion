@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { CheckCircle2, ShieldCheck } from 'lucide-react';
+import { CheckCircle2 } from 'lucide-react';
+import LegionCrest from '../components/shared/LegionCrest';
 import { supabase } from '../lib/supabase';
 import { verifyMinimumGroupRank } from '../lib/auth';
 import type { Profile } from '../types';
@@ -185,7 +186,7 @@ export default function ApplyPage() {
       <div className="space-y-6">
         <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-silver/40 bg-slateBlue/30"><ShieldCheck className="h-5 w-5 text-silver" /></div>
+            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-silver/40 bg-slateBlue/30"><LegionCrest className="h-5 w-5 object-contain" /></div>
             <div>
               <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Recruit</div>
               <div className="font-semibold text-silver">{profile?.roblox_username ?? 'Roblox Username'}</div>
