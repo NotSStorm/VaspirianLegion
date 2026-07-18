@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Menu, Sparkles } from 'lucide-react';
+import { Menu } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { getAuthenticatedState } from '../lib/auth';
 import { supabase } from '../lib/supabase';
@@ -192,12 +192,6 @@ export default function Layout({ children }: { children: ReactNode }) {
       </header>
 
       <main className="w-full px-4 py-8 sm:px-6 lg:px-10 xl:px-14">
-        <div className="mb-8 rounded border border-slateBlue/70 bg-[#141a24] p-3 text-sm text-slate-300">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-silver" />
-            <span className="uppercase tracking-[0.3em]">Site is a work in progress</span>
-          </div>
-        </div>
         {children}
       </main>
     </div>
