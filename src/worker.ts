@@ -317,10 +317,18 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
         ? payload.data.find((entry: any) => String(entry?.group?.id) === String(groupId))
         : null;
 
+      if (!groupRole?.role?.name) {
+        return {
+          usernameKey,
+          ok: false,
+          roleName: null as string | null
+        };
+      }
+
       return {
         usernameKey,
         ok: true,
-        roleName: groupRole?.role?.name ? String(groupRole.role.name) : 'Unranked'
+        roleName: String(groupRole.role.name)
       };
     }));
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import AssignmentSelect from '../components/shared/AssignmentSelect';
 import PersonnelTable from '../components/shared/PersonnelTable';
 import { getAuthenticatedState } from '../lib/auth';
+import { fetchExcludedPersonnelNames, normalizePersonnelName } from '../lib/personnel';
 import { supabase } from '../lib/supabase';
 
 const GROUP_ID = '5531725';
@@ -134,7 +135,7 @@ export default function PersonnelPage() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [personnelDirectoryRows, setPersonnelDirectoryRows] = useState<PersonnelDirectoryRecord[]>([]);
 
-  const normalizeName = (value?: string | null) => String(value || '').trim().replace(/[_\s]+/g, '').toLowerCase();
+  const normalizeName = (value?: string | null) => normalizePersonnelName(value);
 
   const sanitizeGroupRank = (value?: string | null) => {
     const raw = String(value || '').trim();
@@ -180,6 +181,16 @@ export default function PersonnelPage() {
     return ALLOWED_GROUP_RANKS[allowedIndex];
   };
 
+  const shouldSkipUnrankedOverwrite = (existingRank?: string | null, incomingRank?: string | null) => {
+    const normalizedIncoming = String(incomingRank || '').trim().toLowerCase();
+    if (normalizedIncoming !== 'unranked') {
+      return false;
+    }
+
+    const normalizedExisting = String(existingRank || '').trim().toLowerCase();
+    return normalizedExisting.length > 0 && normalizedExisting !== 'unranked';
+  };
+
   const getRankSortWeight = (rank?: string | null) => {
     const normalized = String(rank || '').trim().toLowerCase();
     const rankIndex = RANK_INDEX_BY_KEY.get(normalized);
@@ -196,6 +207,8 @@ export default function PersonnelPage() {
     try {
       const { profile } = await getAuthenticatedState();
       setIsStaff(profile?.role === 'admin' || profile?.role === 'officer');
+
+      const excludedNames = await fetchExcludedPersonnelNames();
 
       const { data: rosterData, error: rosterError } = await supabase
         .from('roster')
@@ -224,7 +237,8 @@ export default function PersonnelPage() {
         throw personnelError;
       }
 
-      const personnelDirectory = (personnelResponse.data || []) as PersonnelDirectoryRecord[];
+      const personnelDirectory = ((personnelResponse.data || []) as PersonnelDirectoryRecord[])
+        .filter((entry) => !excludedNames.has(normalizeName(entry.roblox_username)));
 
       const profileIds = (rosterData || []).map((entry: any) => entry.profile_id);
       const { data: medalData } = await supabase
@@ -262,7 +276,7 @@ export default function PersonnelPage() {
       ((battleLogData || []) as BattleLogParticipant[]).forEach((entry) => {
         const participantName = String(entry.participant_name || '').trim();
         const normalized = normalizeName(participantName);
-        if (!participantName || battleParticipants.has(normalized)) {
+        if (!participantName || excludedNames.has(normalized) || battleParticipants.has(normalized)) {
           return;
         }
 
@@ -275,6 +289,9 @@ export default function PersonnelPage() {
       const rosterRowsResolved = await Promise.all(
         rosterRecords.map(async (entry) => {
           const robloxName = entry.profile?.roblox_username || entry.callsign || entry.profile?.discord_username || 'Unknown';
+          if (excludedNames.has(normalizeName(robloxName)) || excludedNames.has(normalizeName(entry.profile?.callsign)) || excludedNames.has(normalizeName(entry.callsign))) {
+            return null;
+          }
           if (!isRosterEligibleRank(entry.rank)) {
             return null;
           }
@@ -419,16 +436,17 @@ export default function PersonnelPage() {
     setSyncSummary(null);
 
     try {
+      const excludedNames = await fetchExcludedPersonnelNames();
       const rowsWithUsernames = rosterRows
         .map((entry) => ({
           entry,
           username: String(entry.profile?.roblox_username || entry.callsign || '').trim()
         }))
-        .filter((item) => item.username.length > 0);
+        .filter((item) => item.username.length > 0 && !excludedNames.has(normalizeName(item.username)));
 
       const personnelDirectoryUsernames = personnelDirectoryRows
         .map((entry) => String(entry.roblox_username || '').trim())
-        .filter(Boolean);
+        .filter((value) => Boolean(value) && !excludedNames.has(normalizeName(value)));
 
       const personnelUsernames = rows
         .map((row) => {
@@ -439,7 +457,7 @@ export default function PersonnelPage() {
           }
           return row.combinedName.slice(separatorIndex + separator.length).trim();
         })
-        .filter(Boolean);
+        .filter((value) => Boolean(value) && !excludedNames.has(normalizeName(value)));
 
       const candidateUsernames = [
         ...rowsWithUsernames.map((item) => item.username),
@@ -529,6 +547,11 @@ export default function PersonnelPage() {
           continue;
         }
 
+        if (shouldSkipUnrankedOverwrite(entry.rank, resolvedRank)) {
+          rosterRanksUnchanged += 1;
+          continue;
+        }
+
         if (resolvedRank === entry.rank) {
           rosterRanksUnchanged += 1;
           continue;
@@ -560,6 +583,11 @@ export default function PersonnelPage() {
         }
 
         const existingDirectory = personnelDirectoryByKey.get(usernameKey) || null;
+        if (shouldSkipUnrankedOverwrite(existingDirectory?.rank, resolvedRank)) {
+          personnelRanksUnchanged += 1;
+          continue;
+        }
+
         if (existingDirectory?.rank === resolvedRank) {
           personnelRanksUnchanged += 1;
           continue;

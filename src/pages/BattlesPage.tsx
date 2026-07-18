@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import BattleCard from '../components/shared/BattleCard';
 import { getAuthenticatedState } from '../lib/auth';
+import { fetchExcludedPersonnelNames, normalizePersonnelName } from '../lib/personnel';
 import { supabase } from '../lib/supabase';
 
 type Battle = {
@@ -35,6 +36,7 @@ type ParsedBattleLogInput = {
 };
 
 async function upsertPersonnelDirectory(entries: Array<{ participant_name: string; unit: string }>) {
+  const excludedNames = await fetchExcludedPersonnelNames();
   const uniqueByName = new Map<string, { roblox_username: string; unit: string; updated_at: string }>();
   const nowIso = new Date().toISOString();
 
@@ -44,7 +46,11 @@ async function upsertPersonnelDirectory(entries: Array<{ participant_name: strin
       return;
     }
 
-    const key = username.toLowerCase();
+    const key = normalizePersonnelName(username);
+    if (!key || excludedNames.has(key)) {
+      return;
+    }
+
     if (!uniqueByName.has(key)) {
       uniqueByName.set(key, {
         roblox_username: username,
