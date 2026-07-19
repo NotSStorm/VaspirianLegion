@@ -81,27 +81,42 @@ async function verifyRobloxCode(username: string, code: string) {
   }
 
   try {
+    const trimmedCode = String(code || '').trim();
+    if (!trimmedCode) {
+      return { verified: false, message: 'Verification code is missing. Generate a new code and try again.' };
+    }
+
     const userDetailsResponse = await fetchWithRetry(
       `https://users.roblox.com/v1/users/${usernameCheck.robloxId}`,
-      { method: 'GET' },
-      1,
-      250,
-      5000,
+      {
+        method: 'GET',
+        headers: { Accept: 'application/json' }
+      },
+      2,
+      300,
+      8000,
       'verify-code-user-profile'
     );
+
+    if (userDetailsResponse.status === 429) {
+      return { verified: false, message: 'Roblox is rate limiting profile checks right now. Please try again shortly.' };
+    }
+
     if (!userDetailsResponse.ok) {
+      console.warn(`verifyRobloxCode profile lookup failed with status ${userDetailsResponse.status}`);
       return { verified: false, message: 'Unable to read the Roblox profile description right now.' };
     }
 
     const userDetails = await userDetailsResponse.json().catch(() => ({}));
     const description = String(userDetails?.description || '');
 
-    if (!description.includes(code)) {
+    if (!description.includes(trimmedCode)) {
       return { verified: false, message: 'Code not found on your profile — make sure you saved it and try again' };
     }
 
     return { verified: true, robloxId: usernameCheck.robloxId, description: userDetails?.displayName || usernameCheck.displayName || '' };
-  } catch {
+  } catch (error) {
+    console.warn('verifyRobloxCode users API request failed', error);
     return { verified: false, message: 'Unable to reach the Roblox API right now.' };
   }
 }
