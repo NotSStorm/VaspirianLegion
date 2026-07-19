@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import AssignmentSelect from './AssignmentSelect';
 import { getAuthenticatedState } from '../../lib/auth';
-import { fetchExcludedPersonnelNames, normalizePersonnelName } from '../../lib/personnel';
+import { fetchExcludedPersonnelNames, normalizePersonnelName, syncBattleLogUnitsForAliases } from '../../lib/personnel';
 import { supabase } from '../../lib/supabase';
 
 type ProfileRecord = {
@@ -321,6 +321,14 @@ export default function PersonnelManagementPanel({ onChanged }: PersonnelManagem
             updated_at: new Date().toISOString()
           }, { onConflict: 'roblox_username' });
       }
+
+      await syncBattleLogUnitsForAliases([
+        row.robloxUsername,
+        row.discordUsername,
+        row.callsign,
+        row.displayName,
+        row.personnelUsername
+      ], nextUnit);
 
       await refreshWithMessage(`Updated unit for ${row.displayName}.`);
     } catch (updateError) {

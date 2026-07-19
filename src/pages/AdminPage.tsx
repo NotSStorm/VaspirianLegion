@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getAuthenticatedState } from '../lib/auth';
+import { normalizePersonnelName } from '../lib/personnel';
 import { supabase } from '../lib/supabase';
 import type { Role } from '../types';
 
@@ -32,6 +33,14 @@ type RosterRecord = {
     discord_username?: string | null;
     callsign?: string | null;
   } | null;
+};
+
+type PersonnelDirectoryRecord = {
+  roblox_username: string;
+};
+
+type BattleNameRecord = {
+  participant_name: string;
 };
 
 function toDisplayName(profile?: ProfileRecord | null) {
@@ -72,6 +81,8 @@ export default function AdminPage() {
   const [applications, setApplications] = useState<ApplicationRecord[]>([]);
   const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
   const [rosterRows, setRosterRows] = useState<RosterRecord[]>([]);
+  const [personnelRows, setPersonnelRows] = useState<PersonnelDirectoryRecord[]>([]);
+  const [battleNames, setBattleNames] = useState<BattleNameRecord[]>([]);
   const [viewerProfileId, setViewerProfileId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +99,7 @@ export default function AdminPage() {
       const { profile } = await getAuthenticatedState();
       setViewerProfileId(profile?.id || null);
 
-      const [{ data: applicationData, error: applicationError }, { data: profileData, error: profileError }, { data: rosterData, error: rosterError }] = await Promise.all([
+      const [{ data: applicationData, error: applicationError }, { data: profileData, error: profileError }, { data: rosterData, error: rosterError }, personnelResponse, { data: battleData, error: battleError }] = await Promise.all([
         supabase
           .from('applications')
           .select('id, profile_id, service_number, callsign, timezone, requested_group_join, status, reviewed_by, reviewed_at, created_at')
@@ -100,22 +111,37 @@ export default function AdminPage() {
         supabase
           .from('roster')
           .select('profile_id, callsign, profile:profiles!roster_profile_id_fkey(roblox_username, discord_username, callsign)')
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('personnel')
+          .select('roblox_username'),
+        supabase
+          .from('battle_stat_logs')
+          .select('participant_name')
           .order('created_at', { ascending: true })
       ]);
 
       if (applicationError) throw applicationError;
       if (profileError) throw profileError;
       if (rosterError) throw rosterError;
+      if (battleError) throw battleError;
+      if (personnelResponse.error && !/does not exist|relation/i.test(personnelResponse.error.message)) {
+        throw personnelResponse.error;
+      }
 
       setApplications((applicationData || []) as ApplicationRecord[]);
       setProfiles((profileData || []) as ProfileRecord[]);
       setRosterRows((rosterData || []) as RosterRecord[]);
+      setPersonnelRows((personnelResponse.data || []) as PersonnelDirectoryRecord[]);
+      setBattleNames((battleData || []) as BattleNameRecord[]);
     } catch (loadError) {
       console.error('Unable to load admin data', loadError);
       setError(loadError instanceof Error ? loadError.message : 'Unable to load admin data.');
       setApplications([]);
       setProfiles([]);
       setRosterRows([]);
+      setPersonnelRows([]);
+      setBattleNames([]);
     } finally {
       setLoading(false);
     }
@@ -172,7 +198,7 @@ export default function AdminPage() {
 
   const filteredProfiles = useMemo(() => {
     const query = profileQuery.trim().toLowerCase();
-    const candidates = profiles.filter((entry) => entry.id !== viewerProfileId);
+    const candidates = profiles;
     if (!query) {
       return candidates;
     }
@@ -181,7 +207,33 @@ export default function AdminPage() {
       const aliases = normalizeProfileAliases(entry, aliasesByProfileId);
       return [...aliases, entry.role, entry.id].join(' ').toLowerCase().includes(query);
     });
-  }, [aliasesByProfileId, profileQuery, profiles, viewerProfileId]);
+  }, [aliasesByProfileId, profileQuery, profiles]);
+
+  const unlinkedMatches = useMemo(() => {
+    const query = profileQuery.trim().toLowerCase();
+    if (!query) {
+      return [] as string[];
+    }
+
+    const linkedAliasSet = new Set<string>();
+    profiles.forEach((profile) => {
+      normalizeProfileAliases(profile, aliasesByProfileId).forEach((alias) => {
+        const normalized = normalizePersonnelName(alias);
+        if (normalized) {
+          linkedAliasSet.add(normalized);
+        }
+      });
+    });
+
+    const candidateNames = new Set<string>();
+    personnelRows.forEach((entry) => candidateNames.add(String(entry.roblox_username || '').trim()));
+    battleNames.forEach((entry) => candidateNames.add(String(entry.participant_name || '').trim()));
+
+    return Array.from(candidateNames)
+      .filter(Boolean)
+      .filter((name) => name.toLowerCase().includes(query))
+      .filter((name) => !linkedAliasSet.has(normalizePersonnelName(name)));
+  }, [aliasesByProfileId, battleNames, personnelRows, profileQuery, profiles]);
 
   const refreshWithMessage = async (message: string) => {
     setSuccess(message);
@@ -382,6 +434,24 @@ export default function AdminPage() {
               </div>
             );
           })}
+          {unlinkedMatches.map((name) => (
+            <div key={`unlinked:${name}`} className="flex flex-col gap-3 rounded border border-amber-500/30 bg-[#0d121b] p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-sm font-semibold text-silver">{name}</div>
+                <div className="text-xs text-amber-300">No linked profile found for this name</div>
+              </div>
+              <button
+                type="button"
+                disabled
+                className="rounded border border-amber-500/40 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-amber-300 opacity-70"
+              >
+                Cannot Assign Yet
+              </button>
+            </div>
+          ))}
+          {filteredProfiles.length === 0 && unlinkedMatches.length > 0 && (
+            <p className="text-xs text-slate-500">Those names exist in logs/personnel, but admin role can only be assigned to linked accounts in profiles.</p>
+          )}
         </div>
       </div>
     </section>

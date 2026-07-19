@@ -36,11 +36,16 @@ async function verifyRobloxUsername(username: string) {
   }
 
   try {
-    const userResponse = await fetch('https://users.roblox.com/v1/usernames/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
-    });
+    const userResponse = await fetchWithRetry(
+      'https://users.roblox.com/v1/usernames/users',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
+      },
+      2,
+      250
+    );
 
     if (userResponse.status === 429) {
       return { verified: false, message: 'Roblox is rate limiting username checks right now. Please try again shortly.' };
@@ -247,16 +252,22 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
   const unresolvedUsernames = new Set<string>();
 
   for (const usernameBatch of chunk(uniqueUsernames, BULK_USERNAME_BATCH_SIZE)) {
-    const response = await fetchWithRetry(
-      'https://users.roblox.com/v1/usernames/users',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usernames: usernameBatch, excludeBannedUsers: false })
-      },
-      3,
-      300
-    );
+    let response: Response;
+    try {
+      response = await fetchWithRetry(
+        'https://users.roblox.com/v1/usernames/users',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ usernames: usernameBatch, excludeBannedUsers: false })
+        },
+        3,
+        300
+      );
+    } catch {
+      usernameBatch.forEach((username) => unresolvedUsernames.add(username));
+      continue;
+    }
 
     if (!response.ok) {
       usernameBatch.forEach((username) => unresolvedUsernames.add(username));
@@ -301,12 +312,17 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
   for (let index = 0; index < entries.length; index += BULK_ROLE_CONCURRENCY) {
     const segment = entries.slice(index, index + BULK_ROLE_CONCURRENCY);
     const segmentResults = await Promise.all(segment.map(async ([usernameKey, userId]) => {
-      const response = await fetchWithRetry(
-        `https://groups.roblox.com/v1/users/${encodeURIComponent(userId)}/groups/roles`,
-        { method: 'GET' },
-        3,
-        300
-      );
+      let response: Response;
+      try {
+        response = await fetchWithRetry(
+          `https://groups.roblox.com/v1/users/${encodeURIComponent(userId)}/groups/roles`,
+          { method: 'GET' },
+          3,
+          300
+        );
+      } catch {
+        return { usernameKey, ok: false, roleName: null as string | null };
+      }
 
       if (!response.ok) {
         return { usernameKey, ok: false, roleName: null as string | null };

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import PersonnelManagementPanel from '../components/shared/PersonnelManagementPanel';
 import PersonnelTable from '../components/shared/PersonnelTable';
 import { getAuthenticatedState } from '../lib/auth';
-import { fetchExcludedPersonnelNames, normalizePersonnelName } from '../lib/personnel';
+import { fetchExcludedPersonnelNames, normalizePersonnelName, syncBattleLogUnitsForAliases } from '../lib/personnel';
 import { supabase } from '../lib/supabase';
 
 const GROUP_ID = '5531725';
@@ -408,6 +408,17 @@ export default function PersonnelPage() {
             updated_at: new Date().toISOString()
           }, { onConflict: 'roblox_username' });
       }
+
+      const rosterMatch = row.profileId
+        ? rosterRows.find((entry) => entry.profile_id === row.profileId)
+        : null;
+      await syncBattleLogUnitsForAliases([
+        row.username,
+        rosterMatch?.callsign,
+        rosterMatch?.profile?.roblox_username,
+        rosterMatch?.profile?.discord_username,
+        rosterMatch?.profile?.callsign
+      ], normalizedUnit);
 
       await loadPersonnel();
     } catch (updateError) {
