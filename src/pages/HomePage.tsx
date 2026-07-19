@@ -10,16 +10,43 @@ type BattleLite = {
   start_date: string;
 };
 
+type ScheduleEventLite = {
+  id: string;
+  name: string;
+  theater: string;
+  start_date: string;
+};
+
+function parseDate(value: string) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDate(value: string) {
+  const parsed = parseDate(value);
+  if (!parsed) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  }).format(parsed);
+}
+
 export default function HomePage() {
   const [activePersonnel, setActivePersonnel] = useState(0);
   const [battlesCompleted, setBattlesCompleted] = useState(0);
   const [upcomingEngagements, setUpcomingEngagements] = useState(0);
+  const [upcomingBattles, setUpcomingBattles] = useState<ScheduleEventLite[]>([]);
 
   useEffect(() => {
     const load = async () => {
-      const [{ count: rosterCount }, { data: battleData }] = await Promise.all([
+      const [{ count: rosterCount }, { data: battleData }, { data: scheduleData }] = await Promise.all([
         supabase.from('roster').select('*', { count: 'exact', head: true }),
-        supabase.from('battles').select('id, status, start_date')
+        supabase.from('battles').select('id, status, start_date'),
+        supabase.from('schedule_events').select('id, name, theater, start_date').order('start_date', { ascending: true })
       ]);
 
       const battles = (battleData || []) as BattleLite[];
@@ -32,9 +59,21 @@ export default function HomePage() {
         return !Number.isNaN(parsed.getTime()) && parsed > now;
       }).length;
 
+      const scheduledBattles = ((scheduleData || []) as ScheduleEventLite[])
+        .filter((entry) => {
+          const parsed = parseDate(entry.start_date);
+          return parsed ? parsed > now : false;
+        })
+        .sort((a, b) => {
+          const left = parseDate(a.start_date)?.getTime() || Number.MAX_SAFE_INTEGER;
+          const right = parseDate(b.start_date)?.getTime() || Number.MAX_SAFE_INTEGER;
+          return left - right;
+        });
+
       setActivePersonnel(rosterCount || 0);
       setBattlesCompleted(completed);
-      setUpcomingEngagements(upcoming);
+      setUpcomingEngagements(scheduledBattles.length || upcoming);
+      setUpcomingBattles(scheduledBattles.slice(0, 5));
     };
 
     void load();
@@ -45,6 +84,9 @@ export default function HomePage() {
         void load();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'battles' }, () => {
+        void load();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'schedule_events' }, () => {
         void load();
       })
       .subscribe();
@@ -102,9 +144,20 @@ export default function HomePage() {
       <div className="rounded border border-slateBlue/60 bg-[#0d121b] p-6">
         <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-[0.3em] text-silver">
           <ArrowRight className="h-4 w-4" />
-          Current posture
+          Upcoming Battles
         </div>
-        <p className="mt-3 text-slate-300">The Battery remains ready for mobilization across the Fuirst and Anders Keisariks Armecorps fronts.</p>
+        {upcomingBattles.length === 0 ? (
+          <p className="mt-3 text-slate-300">No battles currently scheduled.</p>
+        ) : (
+          <div className="mt-4 space-y-2">
+            {upcomingBattles.map((entry) => (
+              <div key={entry.id} className="rounded border border-slateBlue/40 bg-[#141a24] px-3 py-2">
+                <div className="text-sm font-semibold text-silver">{entry.name}</div>
+                <div className="text-xs text-slate-400">{formatDate(entry.start_date)} • {entry.theater}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { isInTimeWindow, type TimeWindow } from '../lib/timeWindows';
 
 type Battle = {
   id: string;
@@ -32,7 +33,7 @@ function unitBucket(unit: string) {
 }
 
 export default function RallyTrackerPage() {
-  const [period, setPeriod] = useState<'weekly' | 'monthly'>('weekly');
+  const [period, setPeriod] = useState<TimeWindow>('weekly');
   const [points, setPoints] = useState<TrendPoint[]>([]);
 
   useEffect(() => {
@@ -43,12 +44,6 @@ export default function RallyTrackerPage() {
       ]);
 
       const now = new Date();
-      const cutoff = new Date(now);
-      if (period === 'weekly') {
-        cutoff.setDate(now.getDate() - 7);
-      } else {
-        cutoff.setDate(now.getDate() - 30);
-      }
 
       const battleMap = new Map<string, Battle>();
       ((battles || []) as Battle[]).forEach((battle) => {
@@ -70,11 +65,11 @@ export default function RallyTrackerPage() {
         return null;
       };
 
-      const buildPoints = (selectedCutoff: Date | null) => {
+      const buildPoints = (selectedPeriod: TimeWindow) => {
         const grouped = new Map<string, { melrose: Set<string>; pirkland: Set<string>; total: Set<string> }>();
         ((logs || []) as StatLog[]).forEach((entry) => {
           const date = resolveDate(entry);
-          if (!date || (selectedCutoff && date < selectedCutoff)) return;
+          if (!date || !isInTimeWindow(date, selectedPeriod, now)) return;
 
           const key = date.toISOString().slice(0, 10);
           const existing = grouped.get(key) || { melrose: new Set<string>(), pirkland: new Set<string>(), total: new Set<string>() };
@@ -98,9 +93,7 @@ export default function RallyTrackerPage() {
           }));
       };
 
-      const resolved = buildPoints(cutoff);
-
-      setPoints(resolved.length > 0 || (logs || []).length === 0 ? resolved : buildPoints(null));
+      setPoints(buildPoints(period));
     };
 
     void load();
@@ -152,9 +145,11 @@ export default function RallyTrackerPage() {
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
         <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Operations Attendance</div>
         <h2 className="mt-2 text-3xl font-semibold uppercase tracking-[0.2em] text-silver">Rally Tracker</h2>
+        <p className="mt-2 text-sm text-slate-300">Weekly = last 7 days, Monthly = last 30 days, All Time = full record.</p>
         <div className="mt-4 flex gap-2">
           <button type="button" onClick={() => setPeriod('weekly')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${period === 'weekly' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Weekly</button>
           <button type="button" onClick={() => setPeriod('monthly')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${period === 'monthly' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Monthly</button>
+          <button type="button" onClick={() => setPeriod('all-time')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${period === 'all-time' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>All Time</button>
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { isInTimeWindow, type TimeWindow } from '../lib/timeWindows';
 
 type Battle = {
   id: string;
@@ -38,7 +39,7 @@ const metricLabels: Record<Metric, string> = {
 export default function LeaderboardPage() {
   const [logs, setLogs] = useState<StatLog[]>([]);
   const [battleDates, setBattleDates] = useState<Map<string, Date>>(new Map());
-  const [metric, setMetric] = useState<Metric>('kills');
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>('weekly');
 
   const resolveLogDate = (log: StatLog) => {
     const battleDate = battleDates.get(log.battle_id);
@@ -96,11 +97,12 @@ export default function LeaderboardPage() {
     };
   }, []);
 
-  const aggregateByCutoff = (cutoff: Date | null) => {
+  const aggregateByWindow = (selectedWindow: TimeWindow) => {
+    const now = new Date();
     const map = new Map<string, LeaderEntry & { battleIds: Set<string> }>();
     logs.forEach((log) => {
       const date = resolveLogDate(log);
-      if (!date || (cutoff && date < cutoff)) {
+      if (!date || !isInTimeWindow(date, selectedWindow, now)) {
         return;
       }
 
@@ -128,46 +130,54 @@ export default function LeaderboardPage() {
     }));
   };
 
-  const aggregate = (period: 'weekly' | 'monthly') => {
-    const now = new Date();
-    const weeklyCutoff = new Date(now);
-    weeklyCutoff.setDate(now.getDate() - 7);
-    const monthlyCutoff = new Date(now.getFullYear(), now.getMonth(), 1);
-    const cutoff = period === 'weekly' ? weeklyCutoff : monthlyCutoff;
+  const board = useMemo(() => aggregateByWindow(timeWindow), [logs, battleDates, timeWindow]);
 
-    const filtered = aggregateByCutoff(cutoff);
-    if (filtered.length > 0 || logs.length === 0) {
-      return filtered;
-    }
-
-    return aggregateByCutoff(null);
-  };
-
-  const weekly = useMemo(() => aggregate('weekly'), [logs, battleDates]);
-  const monthly = useMemo(() => aggregate('monthly'), [logs, battleDates]);
-
-  const rankBoard = (board: LeaderEntry[]) => (
-    [...board]
+  const rankBoard = (entries: LeaderEntry[], metric: Metric) => (
+    [...entries]
       .sort((a, b) => (Number(b[metric]) || 0) - (Number(a[metric]) || 0))
-      .slice(0, 50)
+      .slice(0, 10)
   );
 
-  const renderBoard = (title: string, board: LeaderEntry[]) => (
-    <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
-      <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">{title}</h3>
-      <div className="mt-4 space-y-2">
-        {rankBoard(board).length === 0 ? (
-          <p className="text-sm text-slate-400">No data logged yet.</p>
-        ) : rankBoard(board).map((entry, index) => (
-          <div key={`${entry.name}-${entry.unit}`} className="flex items-center justify-between rounded border border-slateBlue/60 px-3 py-2 text-sm">
-            <div className="text-slate-300">{index + 1}. {entry.name} <span className="text-slate-500">({entry.unit})</span></div>
-            <div className="text-right">
-              <div className="text-silver">{metric.toUpperCase()} {entry[metric]}</div>
+  const windowLabel: Record<TimeWindow, string> = {
+    weekly: 'Weekly',
+    monthly: 'Monthly',
+    'all-time': 'All Time'
+  };
+
+  const renderMetricBoard = (metric: Metric) => {
+    const ranked = rankBoard(board, metric);
+
+    return (
+      <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
+        <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">{windowLabel[timeWindow]} {metricLabels[metric]}</h3>
+        <div className="mt-4 space-y-3">
+          {ranked.length === 0 ? (
+            <p className="text-sm text-slate-400">No data logged yet.</p>
+          ) : ranked.map((entry, index) => (
+            <div key={`${metric}-${entry.name}-${entry.unit}`} className="rounded border border-slateBlue/60 bg-[#0d121b] px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-xs uppercase tracking-[0.25em] text-slate-400">#{index + 1}</div>
+                <div className="text-right">
+                  <div className="text-2xl font-semibold uppercase tracking-[0.08em] text-silver">{entry[metric]}</div>
+                  <div className="text-[11px] uppercase tracking-[0.25em] text-slate-400">{metricLabels[metric]}</div>
+                </div>
+              </div>
+              <div className="mt-2 text-sm text-slate-300">{entry.name} <span className="text-slate-500">({entry.unit})</span></div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
-    </div>
+    );
+  };
+
+  const renderWindowButton = (value: TimeWindow, label: string) => (
+    <button
+      type="button"
+      onClick={() => setTimeWindow(value)}
+      className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${timeWindow === value ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}
+    >
+      {label}
+    </button>
   );
 
   return (
@@ -175,16 +185,17 @@ export default function LeaderboardPage() {
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
         <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Performance</div>
         <h2 className="mt-2 text-3xl font-semibold uppercase tracking-[0.2em] text-silver">Leaderboard</h2>
+        <p className="mt-2 text-sm text-slate-300">Weekly = last 7 days, Monthly = last 30 days, All Time = full record.</p>
         <div className="mt-4 flex flex-wrap gap-2">
-          <button type="button" onClick={() => setMetric('kills')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${metric === 'kills' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Kills</button>
-          <button type="button" onClick={() => setMetric('deaths')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${metric === 'deaths' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Deaths</button>
-          <button type="button" onClick={() => setMetric('assists')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${metric === 'assists' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Assists</button>
-          <button type="button" onClick={() => setMetric('events')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${metric === 'events' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Events Attended</button>
+          {renderWindowButton('weekly', 'Weekly')}
+          {renderWindowButton('monthly', 'Monthly')}
+          {renderWindowButton('all-time', 'All Time')}
         </div>
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        {renderBoard(`Weekly ${metricLabels[metric]}`, weekly)}
-        {renderBoard(`Monthly ${metricLabels[metric]}`, monthly)}
+      <div className="grid gap-4 lg:grid-cols-3">
+        {renderMetricBoard('kills')}
+        {renderMetricBoard('deaths')}
+        {renderMetricBoard('assists')}
       </div>
     </section>
   );

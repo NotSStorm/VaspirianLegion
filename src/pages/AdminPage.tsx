@@ -240,6 +240,56 @@ export default function AdminPage() {
     await loadAdminData();
   };
 
+  const ensureRosterEntryForApprovedApplication = async (application: ApplicationRecord) => {
+    const { data: existingRoster, error: rosterLookupError } = await supabase
+      .from('roster')
+      .select('id')
+      .eq('profile_id', application.profile_id)
+      .maybeSingle();
+
+    if (rosterLookupError) {
+      throw rosterLookupError;
+    }
+
+    if (existingRoster) {
+      return;
+    }
+
+    let applicantProfile = profileById.get(application.profile_id) || null;
+    if (!applicantProfile) {
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, role, roblox_username, discord_username, callsign')
+        .eq('id', application.profile_id)
+        .maybeSingle();
+
+      if (profileError) {
+        throw profileError;
+      }
+
+      applicantProfile = (profileData as ProfileRecord | null) || null;
+    }
+
+    const resolvedCallsign = String(
+      applicantProfile?.roblox_username || applicantProfile?.callsign || application.callsign || ''
+    ).trim();
+
+    if (!resolvedCallsign) {
+      throw new Error('Unable to create roster row: applicant callsign/username is missing.');
+    }
+
+    const { error: insertError } = await supabase.from('roster').insert({
+      profile_id: application.profile_id,
+      rank: 'CST',
+      company: null,
+      callsign: resolvedCallsign
+    });
+
+    if (insertError && !/duplicate key value|unique constraint|23505/i.test(insertError.message)) {
+      throw insertError;
+    }
+  };
+
   const reviewApplication = async (application: ApplicationRecord, status: 'approved' | 'rejected') => {
     setBusyKey(`review:${application.id}:${status}`);
     setError(null);
@@ -257,6 +307,10 @@ export default function AdminPage() {
 
       if (updateError) {
         throw updateError;
+      }
+
+      if (status === 'approved') {
+        await ensureRosterEntryForApprovedApplication(application);
       }
 
       await refreshWithMessage(`${status === 'approved' ? 'Approved' : 'Rejected'} application for ${application.callsign}.`);
