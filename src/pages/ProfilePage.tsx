@@ -47,52 +47,24 @@ function normalizeName(value?: string | null) {
   return String(value || '').trim().replace(/[_\s]+/g, '').toLowerCase();
 }
 
-async function resolveRobloxId(robloxId?: string | null, robloxUsername?: string | null) {
-  if (robloxId) {
-    return robloxId;
-  }
-
-  const normalized = String(robloxUsername || '').trim();
-  if (!normalized) {
-    return null;
-  }
-
+async function resolveGroupRank(robloxId?: string | null, robloxUsername?: string | null, fallbackRank = 'Unranked') {
   try {
-    const lookupResponse = await fetch('https://users.roblox.com/v1/usernames/users', {
+    const response = await fetch('/api/roblox/user-rank', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usernames: [normalized], excludeBannedUsers: false })
+      body: JSON.stringify({
+        robloxId,
+        robloxUsername,
+        groupId: GROUP_ID
+      })
     });
 
-    if (!lookupResponse.ok) {
-      return null;
-    }
-
-    const payload = await lookupResponse.json().catch(() => ({}));
-    const first = Array.isArray(payload?.data) ? payload.data[0] : null;
-    return first?.id ? String(first.id) : null;
-  } catch {
-    return null;
-  }
-}
-
-async function resolveGroupRank(robloxId?: string | null, robloxUsername?: string | null, fallbackRank = 'Unranked') {
-  const resolvedId = await resolveRobloxId(robloxId, robloxUsername);
-  if (!resolvedId) {
-    return fallbackRank;
-  }
-
-  try {
-    const response = await fetch(`https://groups.roblox.com/v1/users/${encodeURIComponent(resolvedId)}/groups/roles`);
     if (!response.ok) {
       return fallbackRank;
     }
 
     const payload = await response.json().catch(() => ({}));
-    const groupRole = Array.isArray(payload?.data)
-      ? payload.data.find((entry: any) => String(entry?.group?.id) === GROUP_ID)
-      : null;
-    return groupRole?.role?.name ? String(groupRole.role.name) : fallbackRank;
+    return payload?.rank ? String(payload.rank) : fallbackRank;
   } catch {
     return fallbackRank;
   }

@@ -10,7 +10,7 @@ export async function fetchExcludedPersonnelNames() {
     .select('normalized_name');
 
   if (error) {
-    if (/does not exist|relation/i.test(error.message)) {
+    if (/does not exist|relation|permission|not authorized|jwt|rls|row-level/i.test(error.message) || error.code === '401' || error.code === '403') {
       return new Set<string>();
     }
 

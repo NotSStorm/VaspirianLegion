@@ -5,6 +5,10 @@ async function jsonResponse(payload: unknown, status = 200) {
   });
 }
 
+function normalizePersonnelName(value?: string | null) {
+  return String(value || '').trim().replace(/[_\s]+/g, '').toLowerCase();
+}
+
 function getRateLimitKey(request: Request, env: any) {
   const forwarded = request.headers.get('x-forwarded-for') || '';
   const ip = forwarded.split(',')[0]?.trim() || 'unknown';
@@ -43,8 +47,10 @@ async function verifyRobloxUsername(username: string) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ usernames: [username], excludeBannedUsers: false })
       },
-      2,
-      250
+      1,
+      250,
+      5000,
+      'verify-username'
     );
 
     if (userResponse.status === 429) {
@@ -75,7 +81,14 @@ async function verifyRobloxCode(username: string, code: string) {
   }
 
   try {
-    const userDetailsResponse = await fetch(`https://users.roblox.com/v1/users/${usernameCheck.robloxId}`);
+    const userDetailsResponse = await fetchWithRetry(
+      `https://users.roblox.com/v1/users/${usernameCheck.robloxId}`,
+      { method: 'GET' },
+      1,
+      250,
+      5000,
+      'verify-code-user-profile'
+    );
     if (!userDetailsResponse.ok) {
       return { verified: false, message: 'Unable to read the Roblox profile description right now.' };
     }
@@ -120,7 +133,14 @@ async function verifyRobloxGroupRole(username: string, groupUrl: string, env: an
 
     const userId = usernameCheck.robloxId;
 
-    const rolesResponse = await fetch(`https://groups.roblox.com/v1/users/${userId}/groups/roles`);
+    const rolesResponse = await fetchWithRetry(
+      `https://groups.roblox.com/v1/users/${encodeURIComponent(String(userId))}/groups/roles`,
+      { method: 'GET' },
+      1,
+      250,
+      5000,
+      'verify-group-role'
+    );
     if (!rolesResponse.ok) {
       return { verified: false, checked: true, message: 'Unable to read Roblox group role data.' };
     }
@@ -172,7 +192,14 @@ async function fetchRobloxAvatarImageUrl(input: { robloxId?: string | number | n
   }
 
   try {
-    const response = await fetch(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${encodeURIComponent(resolvedId)}&size=150x150&format=Png&isCircular=true`);
+    const response = await fetchWithRetry(
+      `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${encodeURIComponent(resolvedId)}&size=150x150&format=Png&isCircular=true`,
+      { method: 'GET' },
+      1,
+      250,
+      5000,
+      'avatar-headshot'
+    );
     if (!response.ok) {
       return { ok: false, status: response.status, message: 'Unable to fetch Roblox avatar.', imageUrl: null, robloxId: resolvedId };
     }
@@ -211,13 +238,38 @@ function sleep(ms: number) {
   });
 }
 
-async function fetchWithRetry(url: string, init: RequestInit, retries: number, initialDelayMs: number) {
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(`Request timeout after ${timeoutMs}ms`);
+  }, timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  retries: number,
+  initialDelayMs: number,
+  timeoutMs = 5000,
+  label = 'roblox-fetch'
+) {
   let attempt = 0;
-  let delayMs = initialDelayMs;
+  let delayMs = Math.max(100, initialDelayMs);
+  const maxDelayMs = 1500;
 
   while (attempt <= retries) {
     try {
-      const response = await fetch(url, init);
+      console.log(`[${label}] attempt ${attempt + 1}/${retries + 1}`);
+      const response = await fetchWithTimeout(url, init, timeoutMs);
       if (response.status !== 429 && response.status < 500) {
         return response;
       }
@@ -229,21 +281,71 @@ async function fetchWithRetry(url: string, init: RequestInit, retries: number, i
       const retryAfterHeader = response.headers.get('retry-after');
       const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : Number.NaN;
       const retryDelay = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
-        ? retryAfterSeconds * 1000
-        : delayMs;
+        ? Math.min(retryAfterSeconds * 1000, maxDelayMs)
+        : Math.min(delayMs, maxDelayMs);
+      console.warn(`[${label}] retrying after status ${response.status} with delay ${retryDelay}ms`);
       await sleep(retryDelay);
     } catch (error) {
       if (attempt === retries) {
         throw error;
       }
-      await sleep(delayMs);
+      console.warn(`[${label}] request failed on attempt ${attempt + 1}; retrying in ${Math.min(delayMs, maxDelayMs)}ms`);
+      await sleep(Math.min(delayMs, maxDelayMs));
     }
 
     attempt += 1;
-    delayMs *= 2;
+    delayMs = Math.min(delayMs * 2, maxDelayMs);
   }
 
   throw new Error('Retry loop exited unexpectedly.');
+}
+
+async function fetchPersonnelExclusions(env: any) {
+  const supabaseUrl = String(env.SUPABASE_URL || '').trim();
+  const serviceRoleKey = String(env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  if (!supabaseUrl || !serviceRoleKey) {
+    return {
+      excludedNames: new Set<string>(),
+      warning: 'Exclusions lookup skipped: missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.'
+    };
+  }
+
+  try {
+    const response = await fetchWithTimeout(
+      `${supabaseUrl}/rest/v1/personnel_exclusions?select=normalized_name`,
+      {
+        method: 'GET',
+        headers: {
+          apikey: serviceRoleKey,
+          Authorization: `Bearer ${serviceRoleKey}`
+        }
+      },
+      5000
+    );
+
+    if (!response.ok) {
+      const warning = `Exclusions lookup failed (${response.status}). Sync will continue without exclusions.`;
+      console.warn(warning);
+      return { excludedNames: new Set<string>(), warning };
+    }
+
+    const payload = await response.json().catch(() => []);
+    const excludedNames = new Set<string>();
+    if (Array.isArray(payload)) {
+      payload.forEach((row: any) => {
+        const normalized = normalizePersonnelName(row?.normalized_name);
+        if (normalized) {
+          excludedNames.add(normalized);
+        }
+      });
+    }
+
+    return { excludedNames, warning: null as string | null };
+  } catch (error) {
+    const warning = 'Exclusions lookup failed due to network/timeout. Sync will continue without exclusions.';
+    console.warn(warning, error);
+    return { excludedNames: new Set<string>(), warning };
+  }
 }
 
 async function resolveRobloxUserIdsInBulk(usernames: string[]) {
@@ -252,6 +354,7 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
   const unresolvedUsernames = new Set<string>();
 
   for (const usernameBatch of chunk(uniqueUsernames, BULK_USERNAME_BATCH_SIZE)) {
+    console.log(`[bulk-user-ids] processing batch size ${usernameBatch.length}`);
     let response: Response;
     try {
       response = await fetchWithRetry(
@@ -261,8 +364,10 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ usernames: usernameBatch, excludeBannedUsers: false })
         },
-        3,
-        300
+        1,
+        300,
+        4500,
+        'bulk-user-ids'
       );
     } catch {
       usernameBatch.forEach((username) => unresolvedUsernames.add(username));
@@ -317,8 +422,10 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
         response = await fetchWithRetry(
           `https://groups.roblox.com/v1/users/${encodeURIComponent(userId)}/groups/roles`,
           { method: 'GET' },
-          3,
-          300
+          1,
+          250,
+          4500,
+          'bulk-group-roles'
         );
       } catch {
         return { usernameKey, ok: false, roleName: null as string | null };
@@ -357,7 +464,7 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
     });
 
     if (index + BULK_ROLE_CONCURRENCY < entries.length) {
-      await sleep(120);
+      await sleep(80);
     }
   }
 
@@ -373,6 +480,53 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
 export default {
   async fetch(request: Request, env: any) {
     const url = new URL(request.url);
+
+    if (url.pathname === '/api/roblox/user-rank' && request.method === 'POST') {
+      if (!(await enforceRateLimit(request, env, 15, 60_000))) {
+        return jsonResponse({ message: 'Too many rank lookup requests. Please try again shortly.' }, 429);
+      }
+
+      try {
+        const body = await request.json().catch(() => ({}));
+        const groupId = String(body.groupId || env.ROBLOX_GROUP_ID || '5531725');
+        const resolvedUserId = await resolveRobloxUserId({
+          robloxId: body.robloxId,
+          robloxUsername: body.robloxUsername || body.username
+        });
+
+        if (!resolvedUserId) {
+          return jsonResponse({ message: 'Unable to resolve Roblox user.', rank: 'Unranked', found: false }, 400);
+        }
+
+        const response = await fetchWithRetry(
+          `https://groups.roblox.com/v1/users/${encodeURIComponent(resolvedUserId)}/groups/roles`,
+          { method: 'GET' },
+          1,
+          250,
+          5000,
+          'user-rank'
+        );
+
+        if (!response.ok) {
+          return jsonResponse({ message: 'Unable to fetch Roblox group rank.', rank: 'Unranked', found: false }, 502);
+        }
+
+        const payload = await response.json().catch(() => ({}));
+        const groupRole = Array.isArray(payload?.data)
+          ? payload.data.find((entry: any) => String(entry?.group?.id) === String(groupId))
+          : null;
+
+        return jsonResponse({
+          robloxId: resolvedUserId,
+          groupId,
+          rank: groupRole?.role?.name ? String(groupRole.role.name) : 'Unranked',
+          found: Boolean(groupRole?.role?.name)
+        });
+      } catch (error) {
+        console.error('user-rank endpoint failed', error);
+        return jsonResponse({ message: 'Unable to fetch Roblox group rank.', rank: 'Unranked', found: false }, 500);
+      }
+    }
 
     if (url.pathname === '/api/roblox/verify-username' && request.method === 'POST') {
       if (!(await enforceRateLimit(request, env))) {
@@ -445,7 +599,26 @@ export default {
           return jsonResponse({ message: 'No usernames provided for rank sync.' }, 400);
         }
 
-        const result = await fetchBulkGroupRanks(usernames, groupId);
+        const { excludedNames, warning: exclusionsWarning } = await fetchPersonnelExclusions(env);
+        const usernamesForSync = usernames.filter((username) => !excludedNames.has(normalizePersonnelName(username)));
+
+        if (usernamesForSync.length === 0) {
+          return jsonResponse({
+            groupId,
+            totalRequested: usernames.length,
+            uniqueRequested: 0,
+            usernamesResolved: 0,
+            unresolvedUsernames: [],
+            roleLookupFailures: [],
+            rankByUsername: {},
+            synced: 0,
+            failed: [],
+            exclusionsApplied: excludedNames.size,
+            exclusionsWarning
+          });
+        }
+
+        const result = await fetchBulkGroupRanks(usernamesForSync, groupId);
         const failed = Array.from(new Set([
           ...result.unresolvedUsernames,
           ...result.roleLookupFailures
@@ -453,13 +626,15 @@ export default {
         return jsonResponse({
           groupId,
           totalRequested: usernames.length,
-          uniqueRequested: Array.from(new Set(usernames.map((username) => username.toLowerCase()))).length,
+          uniqueRequested: Array.from(new Set(usernamesForSync.map((username) => username.toLowerCase()))).length,
           usernamesResolved: result.usernamesResolved,
           unresolvedUsernames: result.unresolvedUsernames,
           roleLookupFailures: result.roleLookupFailures,
           rankByUsername: result.rankByUsername,
           synced: result.usernamesResolved,
-          failed
+          failed,
+          exclusionsApplied: excludedNames.size,
+          exclusionsWarning
         });
       } catch {
         return jsonResponse({ message: 'Unable to sync Roblox ranks right now.' }, 500);

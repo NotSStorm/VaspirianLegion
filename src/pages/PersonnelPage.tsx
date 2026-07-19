@@ -434,17 +434,16 @@ export default function PersonnelPage() {
     setSyncSummary(null);
 
     try {
-      const excludedNames = await fetchExcludedPersonnelNames();
       const rowsWithUsernames = rosterRows
         .map((entry) => ({
           entry,
           username: String(entry.profile?.roblox_username || entry.callsign || '').trim()
         }))
-        .filter((item) => item.username.length > 0 && !excludedNames.has(normalizeName(item.username)));
+        .filter((item) => item.username.length > 0);
 
       const personnelDirectoryUsernames = personnelDirectoryRows
         .map((entry) => String(entry.roblox_username || '').trim())
-        .filter((value) => Boolean(value) && !excludedNames.has(normalizeName(value)));
+        .filter((value) => Boolean(value));
 
       const personnelUsernames = rows
         .map((row) => {
@@ -455,7 +454,7 @@ export default function PersonnelPage() {
           }
           return row.combinedName.slice(separatorIndex + separator.length).trim();
         })
-        .filter((value) => Boolean(value) && !excludedNames.has(normalizeName(value)));
+        .filter((value) => Boolean(value));
 
       const candidateUsernames = [
         ...rowsWithUsernames.map((item) => item.username),
