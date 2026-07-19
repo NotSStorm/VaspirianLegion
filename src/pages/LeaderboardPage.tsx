@@ -39,7 +39,7 @@ const metricLabels: Record<Metric, string> = {
 export default function LeaderboardPage() {
   const [logs, setLogs] = useState<StatLog[]>([]);
   const [battleDates, setBattleDates] = useState<Map<string, Date>>(new Map());
-  const [timeWindow, setTimeWindow] = useState<TimeWindow>('weekly');
+  const [metric, setMetric] = useState<Metric>('kills');
 
   const resolveLogDate = (log: StatLog) => {
     const battleDate = battleDates.get(log.battle_id);
@@ -130,7 +130,11 @@ export default function LeaderboardPage() {
     }));
   };
 
-  const board = useMemo(() => aggregateByWindow(timeWindow), [logs, battleDates, timeWindow]);
+  const boardByWindow = useMemo(() => ({
+    weekly: aggregateByWindow('weekly'),
+    monthly: aggregateByWindow('monthly'),
+    'all-time': aggregateByWindow('all-time')
+  }), [logs, battleDates]);
 
   const rankBoard = (entries: LeaderEntry[], metric: Metric) => (
     [...entries]
@@ -144,58 +148,67 @@ export default function LeaderboardPage() {
     'all-time': 'All Time'
   };
 
-  const renderMetricBoard = (metric: Metric) => {
-    const ranked = rankBoard(board, metric);
+  const metricTabs: Array<{ key: Metric; label: string }> = [
+    { key: 'kills', label: 'Kills' },
+    { key: 'deaths', label: 'Deaths' },
+    { key: 'assists', label: 'Assists' },
+    { key: 'events', label: 'Events Attended' }
+  ];
+
+  const windowOrder: TimeWindow[] = ['weekly', 'monthly', 'all-time'];
+
+  const renderRow = (entry: LeaderEntry, index: number) => {
+    const isPodium = index < 3;
 
     return (
-      <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
-        <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">{windowLabel[timeWindow]} {metricLabels[metric]}</h3>
-        <div className="mt-4 space-y-3">
-          {ranked.length === 0 ? (
-            <p className="text-sm text-slate-400">No data logged yet.</p>
-          ) : ranked.map((entry, index) => (
-            <div key={`${metric}-${entry.name}-${entry.unit}`} className="rounded border border-slateBlue/60 bg-[#0d121b] px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-xs uppercase tracking-[0.25em] text-slate-400">#{index + 1}</div>
-                <div className="text-right">
-                  <div className="text-2xl font-semibold uppercase tracking-[0.08em] text-silver">{entry[metric]}</div>
-                  <div className="text-[11px] uppercase tracking-[0.25em] text-slate-400">{metricLabels[metric]}</div>
-                </div>
-              </div>
-              <div className="mt-2 text-sm text-slate-300">{entry.name} <span className="text-slate-500">({entry.unit})</span></div>
-            </div>
-          ))}
+      <div key={`${entry.name}-${entry.unit}-${index}`} className="flex items-center justify-between gap-3 rounded border border-slateBlue/50 bg-[#0d121b] px-3 py-2">
+        <div className={`truncate ${isPodium ? 'text-sm font-semibold text-silver' : 'text-xs text-slate-300'}`}>
+          <span className={isPodium ? 'text-slate-200' : 'text-slate-400'}>#{index + 1}</span>
+          <span className="ml-2">{entry.name}</span>
+          <span className="ml-1 text-slate-500">({entry.unit || 'Unassigned'})</span>
+        </div>
+        <div className={`shrink-0 text-right uppercase tracking-[0.14em] ${isPodium ? 'text-xl font-semibold text-silver' : 'text-xs font-medium text-slate-300'}`}>
+          {entry[metric]} {metricLabels[metric]}
         </div>
       </div>
     );
   };
 
-  const renderWindowButton = (value: TimeWindow, label: string) => (
-    <button
-      type="button"
-      onClick={() => setTimeWindow(value)}
-      className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${timeWindow === value ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}
-    >
-      {label}
-    </button>
-  );
+  const renderWindowColumn = (window: TimeWindow) => {
+    const ranked = rankBoard(boardByWindow[window], metric);
+
+    return (
+      <div key={window} className="rounded border border-slateBlue/70 bg-[#141a24] p-4">
+        <h3 className="text-sm font-semibold uppercase tracking-[0.3em] text-silver">{windowLabel[window]}</h3>
+        <div className="mt-3 space-y-2">
+          {ranked.length === 0 ? (
+            <p className="text-sm text-slate-400">No data logged yet.</p>
+          ) : ranked.map((entry, index) => renderRow(entry, index))}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <section className="space-y-6">
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
         <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Performance</div>
         <h2 className="mt-2 text-3xl font-semibold uppercase tracking-[0.2em] text-silver">Leaderboard</h2>
-        <p className="mt-2 text-sm text-slate-300">Weekly = last 7 days, Monthly = last 30 days, All Time = full record.</p>
         <div className="mt-4 flex flex-wrap gap-2">
-          {renderWindowButton('weekly', 'Weekly')}
-          {renderWindowButton('monthly', 'Monthly')}
-          {renderWindowButton('all-time', 'All Time')}
+          {metricTabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setMetric(tab.key)}
+              className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${metric === tab.key ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       </div>
       <div className="grid gap-4 lg:grid-cols-3">
-        {renderMetricBoard('kills')}
-        {renderMetricBoard('deaths')}
-        {renderMetricBoard('assists')}
+        {windowOrder.map((window) => renderWindowColumn(window))}
       </div>
     </section>
   );

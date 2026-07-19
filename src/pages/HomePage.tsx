@@ -35,6 +35,18 @@ function formatDate(value: string) {
   }).format(parsed);
 }
 
+function formatTime(value: string) {
+  const parsed = parseDate(value);
+  if (!parsed) {
+    return 'N/A';
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+    minute: '2-digit'
+  }).format(parsed);
+}
+
 export default function HomePage() {
   const [activePersonnel, setActivePersonnel] = useState(0);
   const [battlesCompleted, setBattlesCompleted] = useState(0);
@@ -153,7 +165,7 @@ export default function HomePage() {
             {upcomingBattles.map((entry) => (
               <div key={entry.id} className="rounded border border-slateBlue/40 bg-[#141a24] px-3 py-2">
                 <div className="text-sm font-semibold text-silver">{entry.name}</div>
-                <div className="text-xs text-slate-400">{formatDate(entry.start_date)} • {entry.theater}</div>
+                <div className="text-xs text-slate-400">{formatDate(entry.start_date)} • {formatTime(entry.start_date)} • {entry.theater || 'Unassigned Theater'}</div>
               </div>
             ))}
           </div>
