@@ -140,14 +140,14 @@ export default function RallyTrackerPage() {
     value: selector(point)
   }));
 
-  const chartWidthPx = Math.max(640, points.length * 44);
+  const pointSpacing = period === 'all-time' ? 56 : period === 'monthly' ? 48 : 64;
+  const chartWidthPx = Math.max(720, points.length * pointSpacing);
 
   return (
     <section className="space-y-6">
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
         <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Operations Attendance</div>
         <h2 className="mt-2 text-3xl font-semibold uppercase tracking-[0.2em] text-silver">Rally Tracker</h2>
-        <p className="mt-2 text-sm text-slate-300">Weekly = last 7 days, Monthly = last 30 days, All Time = full record.</p>
         <div className="mt-4 flex gap-2">
           <button type="button" onClick={() => setPeriod('weekly')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${period === 'weekly' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Weekly</button>
           <button type="button" onClick={() => setPeriod('monthly')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${period === 'monthly' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Monthly</button>
@@ -181,19 +181,25 @@ export default function RallyTrackerPage() {
                 {pointCoordinates((point) => point.total).map((point, index) => (
                   <g key={`total-${index}`}>
                     <circle cx={point.x} cy={point.y} r="1.3" fill="#ffffff" />
-                    <text x={point.x} y={point.y - 3} textAnchor="middle" fontSize="4" fill="#ffffff">{point.value}</text>
+                    <circle cx={point.x} cy={point.y} r="2.4" fill="transparent">
+                      <title>{`${points[index]?.date ?? 'Unknown date'} | Total: ${point.value}`}</title>
+                    </circle>
                   </g>
                 ))}
                 {pointCoordinates((point) => point.pirkland).map((point, index) => (
                   <g key={`pirkland-${index}`}>
                     <circle cx={point.x} cy={point.y} r="1.2" fill="#60a5fa" />
-                    <text x={point.x} y={point.y - 3} textAnchor="middle" fontSize="3.6" fill="#60a5fa">{point.value}</text>
+                    <circle cx={point.x} cy={point.y} r="2.4" fill="transparent">
+                      <title>{`${points[index]?.date ?? 'Unknown date'} | Pirkland: ${point.value}`}</title>
+                    </circle>
                   </g>
                 ))}
                 {pointCoordinates((point) => point.melrose).map((point, index) => (
                   <g key={`melrose-${index}`}>
                     <circle cx={point.x} cy={point.y} r="1.2" fill="#d946ef" />
-                    <text x={point.x} y={point.y - 3} textAnchor="middle" fontSize="3.6" fill="#d946ef">{point.value}</text>
+                    <circle cx={point.x} cy={point.y} r="2.4" fill="transparent">
+                      <title>{`${points[index]?.date ?? 'Unknown date'} | Melrose: ${point.value}`}</title>
+                    </circle>
                   </g>
                 ))}
               </svg>

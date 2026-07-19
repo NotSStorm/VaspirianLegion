@@ -77,6 +77,11 @@ function normalizeProfileAliases(profile: ProfileRecord, aliasesByProfileId: Map
   return Array.from(new Set(aliases));
 }
 
+type RosterEnsureResult = {
+  created: boolean;
+  callsign: string;
+};
+
 export default function AdminPage() {
   const [applications, setApplications] = useState<ApplicationRecord[]>([]);
   const [profiles, setProfiles] = useState<ProfileRecord[]>([]);
@@ -240,10 +245,10 @@ export default function AdminPage() {
     await loadAdminData();
   };
 
-  const ensureRosterEntryForApprovedApplication = async (application: ApplicationRecord) => {
+  const ensureRosterEntryForApprovedApplication = async (application: ApplicationRecord): Promise<RosterEnsureResult> => {
     const { data: existingRoster, error: rosterLookupError } = await supabase
       .from('roster')
-      .select('id')
+      .select('profile_id, callsign')
       .eq('profile_id', application.profile_id)
       .maybeSingle();
 
@@ -252,7 +257,10 @@ export default function AdminPage() {
     }
 
     if (existingRoster) {
-      return;
+      return {
+        created: false,
+        callsign: String(existingRoster.callsign || application.callsign || '').trim()
+      };
     }
 
     let applicantProfile = profileById.get(application.profile_id) || null;
@@ -285,9 +293,21 @@ export default function AdminPage() {
       callsign: resolvedCallsign
     });
 
-    if (insertError && !/duplicate key value|unique constraint|23505/i.test(insertError.message)) {
+    if (insertError) {
+      if (/duplicate key value|unique constraint|23505/i.test(insertError.message)) {
+        return {
+          created: false,
+          callsign: resolvedCallsign
+        };
+      }
+
       throw insertError;
     }
+
+    return {
+      created: true,
+      callsign: resolvedCallsign
+    };
   };
 
   const reviewApplication = async (application: ApplicationRecord, status: 'approved' | 'rejected') => {
@@ -317,6 +337,27 @@ export default function AdminPage() {
     } catch (updateError) {
       console.error('Unable to review application', updateError);
       setError(updateError instanceof Error ? updateError.message : 'Unable to review application.');
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const reprocessAcceptedApplication = async (application: ApplicationRecord) => {
+    setBusyKey(`reprocess:${application.id}`);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const result = await ensureRosterEntryForApprovedApplication(application);
+      const displayCallsign = result.callsign || application.callsign || toDisplayName(profileById.get(application.profile_id) || null);
+      await refreshWithMessage(
+        result.created
+          ? `Roster entry created for ${displayCallsign}.`
+          : `${displayCallsign} already has a roster entry.`
+      );
+    } catch (reprocessError) {
+      console.error('Unable to re-process accepted application', reprocessError);
+      setError(reprocessError instanceof Error ? reprocessError.message : 'Unable to re-process accepted application.');
     } finally {
       setBusyKey(null);
     }
@@ -417,13 +458,30 @@ export default function AdminPage() {
             {!loading && acceptedApplications.length === 0 && <p className="text-sm text-slate-400">No approved applications yet.</p>}
             <div className="space-y-3">
               {acceptedApplications.map((application) => {
+                const reprocessBusy = busyKey === `reprocess:${application.id}`;
                 const applicant = profileById.get(application.profile_id) || null;
                 const reviewer = application.reviewed_by ? (profileById.get(application.reviewed_by) || null) : null;
+                const hasRosterEntry = rosterRows.some((row) => row.profile_id === application.profile_id);
                 return (
                   <div key={application.id} className="rounded border border-slateBlue/60 bg-[#0d121b] p-4">
-                    <div className="text-sm font-semibold text-silver">{application.callsign || toDisplayName(applicant)}</div>
-                    <div className="mt-1 text-xs text-slate-400">Applicant: {toDisplayName(applicant)} • Timezone: {application.timezone || 'N/A'}</div>
-                    <div className="mt-1 text-xs text-slate-500">Approved {formatDateTime(application.reviewed_at)} by {toDisplayName(reviewer)}</div>
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <div className="text-sm font-semibold text-silver">{application.callsign || toDisplayName(applicant)}</div>
+                        <div className="mt-1 text-xs text-slate-400">Applicant: {toDisplayName(applicant)} • Timezone: {application.timezone || 'N/A'}</div>
+                        <div className="mt-1 text-xs text-slate-500">Approved {formatDateTime(application.reviewed_at)} by {toDisplayName(reviewer)}</div>
+                        <div className={`mt-1 text-xs ${hasRosterEntry ? 'text-emerald-300' : 'text-amber-300'}`}>
+                          {hasRosterEntry ? 'Roster entry exists' : 'Roster entry missing'}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void reprocessAcceptedApplication(application)}
+                        disabled={reprocessBusy}
+                        className="rounded border border-emerald-500/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.25em] text-emerald-300 disabled:opacity-60"
+                      >
+                        {reprocessBusy ? 'Re-Processing...' : 'Retry Roster Creation'}
+                      </button>
+                    </div>
                   </div>
                 );
               })}
