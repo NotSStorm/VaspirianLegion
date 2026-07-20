@@ -51,7 +51,7 @@ export default function PersonnelTable({ rows, editableUnits = false, unitOption
                   row.unit
                 )}
               </td>
-              <td className="px-4 py-3">{row.groupRank}</td>
+              <td className="px-4 py-3">{row.groupRank || 'Not yet synced'}</td>
               <td className="px-4 py-3">
                 <div className="flex flex-wrap gap-2">
                   {row.medals.length === 0 ? (

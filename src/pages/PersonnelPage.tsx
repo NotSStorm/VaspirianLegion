@@ -113,6 +113,7 @@ type RosterRecord = {
   id?: string;
   profile_id: string;
   rank: string;
+  group_rank?: string | null;
   callsign?: string | null;
   company?: string | null;
   profile?: {
@@ -183,7 +184,7 @@ export default function PersonnelPage() {
   const sanitizeGroupRank = (value?: string | null) => {
     const raw = String(value || '').trim();
     if (!raw) {
-      return 'Unranked';
+      return 'Not yet synced';
     }
 
     return canonicalizeGroupRank(raw) || raw;
@@ -252,7 +253,7 @@ export default function PersonnelPage() {
 
       const { data: rosterData, error: rosterError } = await supabase
         .from('roster')
-        .select('id, profile_id, rank, callsign, company, profile:profiles!roster_profile_id_fkey(roblox_username, roblox_id, discord_username, callsign, rank, company)')
+        .select('id, profile_id, rank, group_rank, callsign, company, profile:profiles!roster_profile_id_fkey(roblox_username, roblox_id, discord_username, callsign, rank, company)')
         .order('created_at', { ascending: true });
 
       if (rosterError) {
@@ -312,6 +313,14 @@ export default function PersonnelPage() {
         }
       });
 
+      const groupRankByProfileId = new Map<string, string>();
+      rosterRecords.forEach((entry) => {
+        const rank = String(entry.group_rank || '').trim();
+        if (rank) {
+          groupRankByProfileId.set(entry.profile_id, sanitizeGroupRank(rank));
+        }
+      });
+
       const battleParticipants = new Map<string, BattleLogParticipant>();
       ((battleLogData || []) as BattleLogParticipant[]).forEach((entry) => {
         const participantName = String(entry.participant_name || '').trim();
@@ -335,7 +344,7 @@ export default function PersonnelPage() {
           if (!isRosterEligibleRank(entry.rank)) {
             return null;
           }
-          const groupRank = sanitizeGroupRank(entry.rank);
+          const groupRank = sanitizeGroupRank(entry.group_rank);
 
           return {
             key: `profile:${entry.profile_id}`,
@@ -355,7 +364,7 @@ export default function PersonnelPage() {
           const normalized = normalizeName(entry.participant_name);
           const matchedProfile = profileAliases.get(normalized) || null;
           const directoryMatch = personnelByAlias.get(normalized) || null;
-          const sourceRank = matchedProfile?.rank || directoryMatch?.rank || 'Unranked';
+          const sourceRank = (matchedProfile?.id ? groupRankByProfileId.get(matchedProfile.id) : null) || directoryMatch?.rank || null;
           if (!isRosterEligibleRank(sourceRank)) {
             return null;
           }
@@ -582,19 +591,19 @@ export default function PersonnelPage() {
           continue;
         }
 
-        if (shouldSkipUnrankedOverwrite(entry.rank, resolvedRank)) {
+        if (shouldSkipUnrankedOverwrite(entry.group_rank, resolvedRank)) {
           rosterRanksUnchanged += 1;
           continue;
         }
 
-        if (resolvedRank === entry.rank) {
+        if (resolvedRank === entry.group_rank) {
           rosterRanksUnchanged += 1;
           continue;
         }
 
         const { error } = await supabase
           .from('roster')
-          .update({ rank: resolvedRank })
+          .update({ group_rank: resolvedRank })
           .eq('profile_id', entry.profile_id);
 
         if (error) {
@@ -698,7 +707,7 @@ export default function PersonnelPage() {
         {syncError && <p className="mt-4 text-sm text-red-400">{syncError}</p>}
         {syncSummary && (
           <div className="mt-4 rounded border border-slateBlue/60 bg-[#0d121b] p-3 text-sm text-slate-300">
-            Synced {syncSummary.rosterRanksUpdated} roster ranks and {syncSummary.personnelRanksUpdated} personnel ranks. Resolved usernames: {syncSummary.usernamesResolved} of {syncSummary.uniqueUsernamesChecked}.
+            Synced {syncSummary.rosterRanksUpdated} roster group ranks and {syncSummary.personnelRanksUpdated} personnel ranks. Resolved usernames: {syncSummary.usernamesResolved} of {syncSummary.uniqueUsernamesChecked}.
           </div>
         )}
       </div>

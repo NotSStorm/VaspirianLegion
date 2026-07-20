@@ -17,6 +17,7 @@ type HeaderProfile = {
 
 type RosterRecord = {
   rank: string;
+  group_rank?: string | null;
   company?: string | null;
 };
 
@@ -121,14 +122,14 @@ export default function ProfilePage() {
 
         const { data: rosterRow } = await supabase
           .from('roster')
-          .select('rank, company')
+          .select('rank, group_rank, company')
           .eq('profile_id', authProfile.id)
           .maybeSingle();
 
         const resolvedGroupRank = await resolveGroupRank(
           authProfile.roblox_id || null,
           authProfile.roblox_username || null,
-          (rosterRow as RosterRecord | null)?.rank || authProfile.rank || 'Unranked'
+          (rosterRow as RosterRecord | null)?.group_rank || 'Not yet synced'
         );
 
         const currentProfile = {
@@ -136,7 +137,7 @@ export default function ProfilePage() {
           robloxUsername: authProfile.roblox_username || null,
           robloxId: authProfile.roblox_id || null,
           callsign: authProfile.callsign || null,
-          rank: (rosterRow as RosterRecord | null)?.rank || authProfile.rank || null,
+          rank: authProfile.rank || null,
           company: (rosterRow as RosterRecord | null)?.company || authProfile.company || null,
           groupRank: resolvedGroupRank
         };
@@ -265,7 +266,7 @@ export default function ProfilePage() {
                   )}
                 </div>
                 <div className="mt-4 text-xl font-semibold uppercase tracking-[0.2em] text-silver">{profile?.robloxUsername || profile?.discordUsername || 'Member'}</div>
-                <div className="mt-2 text-sm text-slate-300">{profile?.groupRank || profile?.rank || 'Unranked'}{profile?.company ? ` • ${profile.company}` : ''}</div>
+                <div className="mt-2 text-sm text-slate-300">{profile?.groupRank || 'Not yet synced'}{profile?.company ? ` • ${profile.company}` : ''}</div>
                 {profile?.callsign && <div className="mt-1 text-xs uppercase tracking-[0.3em] text-slate-400">{profile.callsign}</div>}
               </div>
             </div>
