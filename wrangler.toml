@@ -4,7 +4,7 @@ main = "./src/worker.ts"
 
 [[kv_namespaces]]
 binding = "SYNC_PROGRESS"
-id = "REPLACE_WITH_SYNC_PROGRESS_KV_ID"
+id = "63cbd7bd5f4949a69c900b8012aa5114"
 preview_id = "REPLACE_WITH_SYNC_PROGRESS_KV_PREVIEW_ID"
 
 [assets]
