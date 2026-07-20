@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import BattleCard from '../components/shared/BattleCard';
 import { getAuthenticatedState } from '../lib/auth';
 import { fetchExcludedPersonnelNames, normalizePersonnelName } from '../lib/personnel';
@@ -95,6 +95,7 @@ export default function BattlesPage() {
     pointsScored: 0,
     description: ''
   });
+  const battleEditorRef = useRef<HTMLDivElement | null>(null);
 
   const defaultFormState = {
     id: '',
@@ -425,6 +426,30 @@ export default function BattlesPage() {
     }
   };
 
+  const editBattle = (battle: Battle) => {
+    setFormState({
+      id: battle.id,
+      name: battle.name,
+      classification: battle.classification,
+      commandingOfficer: battle.commanding_officer,
+      date: battle.start_date,
+      pointsScored: battle.threat_level,
+      description: battle.description
+    });
+    setSelectedBattleId(battle.id);
+
+    const scrollToEditor = () => {
+      battleEditorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(scrollToEditor);
+      return;
+    }
+
+    setTimeout(scrollToEditor, 0);
+  };
+
   return (
     <section className="space-y-6">
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
@@ -488,15 +513,7 @@ export default function BattlesPage() {
               <div className="mt-2 flex gap-2">
                 <button
                   type="button"
-                  onClick={() => setFormState({
-                    id: battle.id,
-                    name: battle.name,
-                    classification: battle.classification,
-                    commandingOfficer: battle.commanding_officer,
-                    date: battle.start_date,
-                    pointsScored: battle.threat_level,
-                    description: battle.description
-                  })}
+                  onClick={() => editBattle(battle)}
                   className="rounded border border-slateBlue/70 px-3 py-1 text-xs uppercase tracking-[0.3em] text-slate-300"
                 >
                   Edit Battle
@@ -533,7 +550,7 @@ export default function BattlesPage() {
 
       {isStaff && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
+          <div id="battle-editor" ref={battleEditorRef} className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
             <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">Battle Editor</h3>
             <div className="mt-4 grid gap-3">
               <label className="text-xs text-slate-400">Battle Name

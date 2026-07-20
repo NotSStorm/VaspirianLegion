@@ -91,4 +91,27 @@ describe('BattlesPage', () => {
     expect(screen.getAllByRole('button', { name: /view logs/i })).toHaveLength(6);
     expect(screen.getByRole('button', { name: /hide past battles/i })).toBeInTheDocument();
   });
+  
+    it('scrolls to the battle editor and preloads form values when clicking Edit Battle', async () => {
+      const scrollIntoViewMock = vi.fn();
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+        configurable: true,
+        value: scrollIntoViewMock
+      });
+  
+      getAuthenticatedStateMock.mockResolvedValueOnce({
+        profile: { role: 'admin' },
+        session: { user: { id: 'user-1' } }
+      });
+  
+      render(<BattlesPage />);
+  
+      const editButtons = await screen.findAllByRole('button', { name: /edit battle/i });
+      fireEvent.click(editButtons[0]);
+  
+      await waitFor(() => {
+        expect(screen.getByLabelText(/battle name/i)).toHaveValue('Battle 1');
+        expect(scrollIntoViewMock).toHaveBeenCalled();
+      });
+    });
 });

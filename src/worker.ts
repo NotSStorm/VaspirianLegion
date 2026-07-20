@@ -237,13 +237,15 @@ async function fetchRobloxAvatarImageUrl(input: { robloxId?: string | number | n
 const BULK_USERNAME_BATCH_SIZE = 100;
 const BULK_ROLE_CONCURRENCY = 2;
 const BULK_USERNAME_BATCH_DELAY_MS = 1200;
-const BULK_USERNAME_THROTTLED_DELAY_MS = 6000;
+const BULK_USERNAME_THROTTLED_DELAY_MS = 10000;
+const BULK_USERNAME_MAX_ATTEMPTS = 3;
+const BULK_USERNAME_INITIAL_RETRY_DELAY_MS = 3000;
+const BULK_USERNAME_MAX_RETRY_DELAY_MS = 30000;
 const SYNC_JOB_TTL_SECONDS = 15 * 60;
 const DEFAULT_SYNC_CONTINUATION_DELAY_MS = 4000;
 
 const DEFAULT_SUBREQUEST_BUDGET = 50;
 const MAX_FETCH_ATTEMPTS_PER_REQUEST = 3; // initial call + up to 2 retries
-const USERNAME_LOOKUP_REQUESTS_PER_INVOCATION = 1;
 const SUBREQUEST_SAFETY_HEADROOM = 8;
 const DEFAULT_MAX_ROLE_LOOKUPS_PER_INVOCATION = 12;
 
@@ -301,6 +303,7 @@ type SyncJobState = {
   bodyUsernamesRequested: number;
   uniqueRequested: number;
   usernames: string[];
+  userIdByUsername: Record<string, string>;
   cursor: number;
   rankByUsername: Record<string, string>;
   unresolvedUsernames: string[];
@@ -499,7 +502,7 @@ async function fetchSyncUsernamesFromSupabase(env: any) {
   if (!supabaseUrl || !serviceRoleKey) {
     return {
       usernames: [] as string[],
-      warnings: ['Supabase source lookup skipped: missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.'],
+      warnings: ['Supabase source lookup skipped: missing env.SUPABASE_URL or env.SUPABASE_SERVICE_ROLE_KEY in this Worker runtime.'],
       diagnostics: {
         rosterRows: 0,
         rosterProfileUsernames: 0,
@@ -635,55 +638,73 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
   for (let batchIndex = 0; batchIndex < usernameBatches.length; batchIndex += 1) {
     const usernameBatch = usernameBatches[batchIndex];
     console.log(`[bulk-user-ids] processing batch ${batchIndex + 1}/${usernameBatches.length} with size ${usernameBatch.length}`);
-    let response: Response;
-    try {
-      response = await fetchWithRetry(
-        'https://users.roblox.com/v1/usernames/users',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ usernames: usernameBatch, excludeBannedUsers: false })
-        },
-        1,
-        1200,
-        8000,
-        'bulk-user-ids',
-        { maxRetryDelayMs: 15000 }
-      );
-    } catch {
-      usernameBatch.forEach((username) => unresolvedUsernames.add(username));
-      batchDiagnostics.push({
-        batchIndex: batchIndex + 1,
-        batchSize: usernameBatch.length,
-        status: null,
-        retryAfterHeader: null,
-        resolvedInBatch: 0,
-        unresolvedInBatch: usernameBatch.length,
-        responsePreview: 'request_failed_or_timed_out',
-        pacingDelayMs: BULK_USERNAME_THROTTLED_DELAY_MS
-      });
-      if (batchIndex + 1 < usernameBatches.length) {
-        await sleep(BULK_USERNAME_THROTTLED_DELAY_MS);
+    let response: Response | null = null;
+    let responsePreview = 'request_failed_or_timed_out';
+    let retryAfterHeader: string | null = null;
+    let pacingDelayMs = BULK_USERNAME_BATCH_DELAY_MS;
+    let completed = false;
+    let attempt = 0;
+    let retryDelayMs = BULK_USERNAME_INITIAL_RETRY_DELAY_MS;
+
+    while (attempt < BULK_USERNAME_MAX_ATTEMPTS && !completed) {
+      attempt += 1;
+
+      try {
+        response = await fetchWithTimeout(
+          'https://users.roblox.com/v1/usernames/users',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ usernames: usernameBatch, excludeBannedUsers: false })
+          },
+          8000
+        );
+      } catch (error) {
+        if (attempt >= BULK_USERNAME_MAX_ATTEMPTS) {
+          console.warn(`[bulk-user-ids] batch ${batchIndex + 1} exhausted retries after request errors`, error);
+          break;
+        }
+
+        const networkRetryDelay = Math.min(retryDelayMs, BULK_USERNAME_MAX_RETRY_DELAY_MS);
+        console.warn(`[bulk-user-ids] batch ${batchIndex + 1} request failed on attempt ${attempt}; retrying in ${networkRetryDelay}ms`);
+        await sleep(networkRetryDelay);
+        retryDelayMs = Math.min(retryDelayMs * 2, BULK_USERNAME_MAX_RETRY_DELAY_MS);
+        continue;
       }
-      continue;
+
+      responsePreview = await response.clone().text().then((text) => text.slice(0, 500)).catch(() => 'unable_to_read_response');
+      retryAfterHeader = response.headers.get('retry-after');
+      console.log(`[bulk-user-ids] batch ${batchIndex + 1}/${usernameBatches.length} attempt ${attempt}/${BULK_USERNAME_MAX_ATTEMPTS} status ${response.status}`);
+
+      if (response.ok) {
+        completed = true;
+        pacingDelayMs = BULK_USERNAME_BATCH_DELAY_MS;
+        break;
+      }
+
+      const retriable = response.status === 429 || response.status >= 500;
+      if (!retriable || attempt >= BULK_USERNAME_MAX_ATTEMPTS) {
+        pacingDelayMs = response.status === 429
+          ? Math.max(BULK_USERNAME_THROTTLED_DELAY_MS, parseRetryAfterMs(retryAfterHeader, BULK_USERNAME_THROTTLED_DELAY_MS, BULK_USERNAME_MAX_RETRY_DELAY_MS))
+          : BULK_USERNAME_BATCH_DELAY_MS;
+        break;
+      }
+
+      const retryDelay = response.status === 429
+        ? Math.max(BULK_USERNAME_THROTTLED_DELAY_MS, parseRetryAfterMs(retryAfterHeader, retryDelayMs, BULK_USERNAME_MAX_RETRY_DELAY_MS))
+        : Math.min(retryDelayMs, BULK_USERNAME_MAX_RETRY_DELAY_MS);
+      pacingDelayMs = retryDelay;
+      console.warn(`[bulk-user-ids] batch ${batchIndex + 1} got status ${response.status}; retrying same batch in ${retryDelay}ms`);
+      await sleep(retryDelay);
+      retryDelayMs = Math.min(retryDelayMs * 2, BULK_USERNAME_MAX_RETRY_DELAY_MS);
     }
 
-    const responsePreview = await response.clone().text().then((text) => text.slice(0, 500)).catch(() => 'unable_to_read_response');
-    const retryAfterHeader = response.headers.get('retry-after');
-    const statusIs429 = response.status === 429;
-    const pacingDelayMs = statusIs429
-      ? Math.max(BULK_USERNAME_BATCH_DELAY_MS, parseRetryAfterMs(retryAfterHeader, BULK_USERNAME_THROTTLED_DELAY_MS, 30000))
-      : BULK_USERNAME_BATCH_DELAY_MS;
-
-    console.log(`[bulk-user-ids] batch ${batchIndex + 1}/${usernameBatches.length} status ${response.status}`);
-
-    if (!response.ok) {
+    if (!response || !response.ok) {
       usernameBatch.forEach((username) => unresolvedUsernames.add(username));
-      console.warn(`[bulk-user-ids] batch ${batchIndex + 1} failed with status ${response.status}, retry-after="${retryAfterHeader || ''}", body: ${responsePreview}`);
       batchDiagnostics.push({
         batchIndex: batchIndex + 1,
         batchSize: usernameBatch.length,
-        status: response.status,
+        status: response?.status ?? null,
         retryAfterHeader,
         resolvedInBatch: 0,
         unresolvedInBatch: usernameBatch.length,
@@ -742,24 +763,10 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
   };
 }
 
-async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
-  const { userIdByUsername, unresolvedUsernames, batchDiagnostics } = await resolveRobloxUserIdsInBulk(usernames);
-  const entries = Array.from(userIdByUsername.entries());
+async function fetchBulkGroupRanks(entries: Array<[string, string]>, groupId: string) {
   const rankByUsername: Record<string, string> = {};
   const roleLookupFailures: string[] = [];
   const lookupDiagnostics: Record<string, LookupDiagnostic> = {};
-
-  unresolvedUsernames.forEach((username) => {
-    const key = username.toLowerCase();
-    lookupDiagnostics[key] = {
-      resolvedUserId: false,
-      groupRolesCallSucceeded: false,
-      matchingGroupFound: false,
-      resolvedRoleName: null,
-      error: 'username_unresolved'
-    };
-    console.warn(`[bulk-group-ranks] ${username}: username to userId resolution failed`);
-  });
 
   for (let index = 0; index < entries.length; index += BULK_ROLE_CONCURRENCY) {
     const segment = entries.slice(index, index + BULK_ROLE_CONCURRENCY);
@@ -847,8 +854,6 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
 
   return {
     rankByUsername,
-    unresolvedUsernames,
-    usernameLookupBatchDiagnostics: batchDiagnostics,
     roleLookupFailures,
     usernamesResolved: entries.length,
     lookupDiagnostics
@@ -909,14 +914,12 @@ function computeMaxRoleLookupsPerInvocation(env: any) {
     : DEFAULT_SUBREQUEST_BUDGET;
 
   // Worst case budget model per invocation:
-  // username lookup: USERNAME_LOOKUP_REQUESTS_PER_INVOCATION * MAX_FETCH_ATTEMPTS_PER_REQUEST
   // role lookups:   N * MAX_FETCH_ATTEMPTS_PER_REQUEST
   // plus fixed safety headroom for future overhead.
   const remainingBudget = Math.max(
     1,
     subrequestBudget
       - SUBREQUEST_SAFETY_HEADROOM
-      - (USERNAME_LOOKUP_REQUESTS_PER_INVOCATION * MAX_FETCH_ATTEMPTS_PER_REQUEST)
   );
 
   const computed = Math.floor(remainingBudget / MAX_FETCH_ATTEMPTS_PER_REQUEST);
@@ -1099,6 +1102,7 @@ export default {
             : [];
 
           const sourceResult = await fetchSyncUsernamesFromSupabase(env);
+          const sourceWarnings = [...sourceResult.warnings];
           const usernames = [
             ...bodyUsernames,
             ...sourceResult.usernames
@@ -1139,13 +1143,40 @@ export default {
               synced: 0,
               failed: [],
               sourceDiagnostics: sourceResult.diagnostics,
-              sourceWarnings: sourceResult.warnings,
+              sourceWarnings,
               exclusionsApplied: excludedNames.size,
               exclusionsWarning,
               nextRecommendedPollAt: null,
               recommendedPollDelayMs: continuationDelayMs
             });
           }
+
+          if (sourceWarnings.some((warning) => /missing env\.SUPABASE_URL|missing env\.SUPABASE_SERVICE_ROLE_KEY/i.test(warning)) && bodyUsernames.length > 0) {
+            sourceWarnings.push('Server-side Supabase username sourcing was skipped, but request-body usernames were still processed for rank sync.');
+          }
+
+          const userIdResolution = await resolveRobloxUserIdsInBulk(usernamesForSync);
+          const resolvedUserIdByUsername: Record<string, string> = {};
+          userIdResolution.userIdByUsername.forEach((userId, usernameKey) => {
+            const normalizedKey = normalizeUsernameKey(usernameKey);
+            if (normalizedKey) {
+              resolvedUserIdByUsername[normalizedKey] = String(userId);
+            }
+          });
+
+          const unresolvedUsernames = Array.from(new Set(userIdResolution.unresolvedUsernames.map((username) => normalizeUsernameKey(username)).filter(Boolean)));
+          const lookupDiagnostics: Record<string, LookupDiagnostic> = {};
+          unresolvedUsernames.forEach((usernameKey) => {
+            lookupDiagnostics[usernameKey] = {
+              resolvedUserId: false,
+              groupRolesCallSucceeded: false,
+              matchingGroupFound: false,
+              resolvedRoleName: null,
+              error: 'username_unresolved'
+            };
+          });
+
+          const roleLookupUsernames = Array.from(new Set(Object.keys(resolvedUserIdByUsername).map((value) => normalizeUsernameKey(value)).filter(Boolean)));
 
           job = {
             jobId: createSyncJobId(),
@@ -1154,27 +1185,68 @@ export default {
             totalRequested: uniqueUsernames.length,
             bodyUsernamesRequested: bodyUsernames.length,
             uniqueRequested: Array.from(new Set(usernamesForSync.map((username) => normalizeUsernameKey(username)))).length,
-            usernames: usernamesForSync,
+            usernames: roleLookupUsernames,
+            userIdByUsername: resolvedUserIdByUsername,
             cursor: 0,
             rankByUsername: {},
-            unresolvedUsernames: [],
+            unresolvedUsernames,
             roleLookupFailures: [],
-            lookupDiagnostics: {},
-            usernameLookupBatchDiagnostics: [],
+            lookupDiagnostics,
+            usernameLookupBatchDiagnostics: userIdResolution.batchDiagnostics,
             sourceDiagnostics: sourceResult.diagnostics,
-            sourceWarnings: sourceResult.warnings,
+            sourceWarnings,
             exclusionsApplied: excludedNames.size,
             exclusionsWarning,
             nextRecommendedPollAt: null,
             recommendedPollDelayMs: continuationDelayMs
           };
+
+          if (job.usernames.length === 0) {
+            return jsonResponse(buildSyncResponseFromJob(job, 'complete'));
+          }
+        }
+
+        if (!job.userIdByUsername || typeof job.userIdByUsername !== 'object') {
+          job.userIdByUsername = {};
         }
 
         const maxRoleLookupsPerInvocation = computeMaxRoleLookupsPerInvocation(env);
-        const usernamesPerStep = Math.max(1, Math.min(maxRoleLookupsPerInvocation, BULK_USERNAME_BATCH_SIZE));
+        const usernamesPerStep = Math.max(1, maxRoleLookupsPerInvocation);
         const batchUsernames = job.usernames.slice(job.cursor, job.cursor + usernamesPerStep);
         if (batchUsernames.length > 0) {
-          const result = await fetchBulkGroupRanks(batchUsernames, job.groupId);
+          const roleLookupEntries = batchUsernames
+            .map((usernameKey) => {
+              const normalizedKey = normalizeUsernameKey(usernameKey);
+              const userId = job!.userIdByUsername[normalizedKey];
+              return userId ? [normalizedKey, userId] as [string, string] : null;
+            })
+            .filter((entry): entry is [string, string] => Boolean(entry));
+
+          const missingUserIdEntries = batchUsernames.filter((usernameKey) => !job!.userIdByUsername[normalizeUsernameKey(usernameKey)]);
+          if (missingUserIdEntries.length > 0) {
+            const unresolvedSet = new Set(job.unresolvedUsernames.map((username) => normalizeUsernameKey(username)));
+            missingUserIdEntries.forEach((usernameKey) => {
+              const normalizedKey = normalizeUsernameKey(usernameKey);
+              unresolvedSet.add(normalizedKey);
+              job!.lookupDiagnostics[normalizedKey] = {
+                resolvedUserId: false,
+                groupRolesCallSucceeded: false,
+                matchingGroupFound: false,
+                resolvedRoleName: null,
+                error: 'username_unresolved'
+              };
+            });
+            job.unresolvedUsernames = Array.from(unresolvedSet);
+          }
+
+          const result = roleLookupEntries.length > 0
+            ? await fetchBulkGroupRanks(roleLookupEntries, job.groupId)
+            : {
+              rankByUsername: {},
+              roleLookupFailures: [],
+              usernamesResolved: 0,
+              lookupDiagnostics: {}
+            };
 
           Object.entries(result.rankByUsername || {}).forEach(([usernameKey, rank]) => {
             const normalizedKey = normalizeUsernameKey(usernameKey);
@@ -1183,15 +1255,6 @@ export default {
               job!.rankByUsername[normalizedKey] = String(rank);
             }
           });
-
-          const unresolvedSet = new Set(job.unresolvedUsernames.map((username) => normalizeUsernameKey(username)));
-          result.unresolvedUsernames.forEach((username) => {
-            const normalizedKey = normalizeUsernameKey(username);
-            if (normalizedKey) {
-              unresolvedSet.add(normalizedKey);
-            }
-          });
-          job.unresolvedUsernames = Array.from(unresolvedSet);
 
           const failedRoleSet = new Set(job.roleLookupFailures.map((username) => normalizeUsernameKey(username)));
           result.roleLookupFailures.forEach((username) => {
@@ -1207,13 +1270,6 @@ export default {
             if (normalizedKey) {
               job!.lookupDiagnostics[normalizedKey] = diagnostic as LookupDiagnostic;
             }
-          });
-
-          job.usernameLookupBatchDiagnostics.push({
-            cursorStart: job.cursor,
-            cursorEndExclusive: job.cursor + batchUsernames.length,
-            usernamesRequested: batchUsernames.length,
-            batches: result.usernameLookupBatchDiagnostics || []
           });
         }
 
