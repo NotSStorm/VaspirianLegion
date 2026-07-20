@@ -48,6 +48,11 @@ const RANK_ALIASES: Record<string, string> = {
 const HIGH_RANK_PATTERN = /\bgeneral\b|brigadier|field marshal|marshal|admiral/i;
 
 type BulkSyncResponse = {
+  status?: 'in_progress' | 'complete';
+  jobId?: string | null;
+  processed?: number;
+  total?: number;
+  cursorPosition?: number;
   groupId: string;
   totalRequested: number;
   uniqueRequested: number;
@@ -563,18 +568,37 @@ export default function PersonnelPage() {
         return;
       }
 
-      const syncResponse = await fetch('/api/roblox/sync-ranks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          groupId: GROUP_ID,
-          usernames: uniqueUsernames
-        })
-      });
+      let syncPayload = {} as BulkSyncResponse;
+      let activeJobId: string | null = null;
 
-      const syncPayload = await syncResponse.json().catch(() => ({} as BulkSyncResponse));
-      if (!syncResponse.ok) {
-        throw new Error(syncPayload?.message || 'Unable to sync Roblox ranks right now.');
+      for (let attempt = 0; attempt < 25; attempt += 1) {
+        const syncResponse = await fetch('/api/roblox/sync-ranks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(activeJobId
+            ? { groupId: GROUP_ID, jobId: activeJobId }
+            : { groupId: GROUP_ID, usernames: uniqueUsernames })
+        });
+
+        syncPayload = await syncResponse.json().catch(() => ({} as BulkSyncResponse));
+        if (!syncResponse.ok) {
+          throw new Error(syncPayload?.message || 'Unable to sync Roblox ranks right now.');
+        }
+
+        if (syncPayload?.status === 'complete' || (!syncPayload?.status && !syncPayload?.jobId)) {
+          break;
+        }
+
+        if (syncPayload?.status === 'in_progress' && syncPayload?.jobId) {
+          activeJobId = syncPayload.jobId;
+          continue;
+        }
+
+        throw new Error('Sync returned an unexpected job state.');
+      }
+
+      if (syncPayload?.status === 'in_progress') {
+        throw new Error('Sync is still in progress. Please run it again.');
       }
 
       const rankByUsername = new Map<string, string>(

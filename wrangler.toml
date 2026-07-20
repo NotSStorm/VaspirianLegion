@@ -2,6 +2,11 @@ name = "regionofvaspiria"
 compatibility_date = "2026-07-01"
 main = "./src/worker.ts"
 
+[[kv_namespaces]]
+binding = "SYNC_PROGRESS"
+id = "REPLACE_WITH_SYNC_PROGRESS_KV_ID"
+preview_id = "REPLACE_WITH_SYNC_PROGRESS_KV_PREVIEW_ID"
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"

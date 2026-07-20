@@ -234,6 +234,106 @@ async function fetchRobloxAvatarImageUrl(input: { robloxId?: string | number | n
 const BULK_USERNAME_BATCH_SIZE = 100;
 const BULK_ROLE_CONCURRENCY = 2;
 const BULK_USERNAME_BATCH_DELAY_MS = 220;
+const SYNC_JOB_TTL_SECONDS = 15 * 60;
+
+// Free-plan budget math (worst case):
+// - Username resolution for one invocation batch: up to 1 request * 3 attempts = 3
+// - Role lookups for N users: N requests * 3 attempts
+// To stay < 50 consistently, pick N=12 => 3 + (12*3) = 39, leaving headroom.
+const MAX_ROLE_LOOKUPS_PER_INVOCATION = 12;
+
+const RANK_HIERARCHY = [
+  'Conscript',
+  'Soldat',
+  'Musketier',
+  'Fusilier',
+  'Legionnaire',
+  'Lance Corporal',
+  'Corporal',
+  'Sergeant',
+  'Staff Sergeant',
+  'Sergeant Major',
+  'Ensign',
+  'Sub-Lieutenant',
+  'Lieutenant',
+  'Captain',
+  'Major',
+  'Lieutenant Colonel',
+  'Colonel',
+  'Nobility',
+  'Brigadier General',
+  'Major General',
+  'Adjutant General',
+  'Lord General',
+  'Architect',
+  'Lordship',
+  'Lord Marshal',
+  'Crown Prince',
+  'Emperor of the Andouran Isles',
+  'Ares'
+] as const;
+
+const RANK_CEILING = 'Colonel';
+const RANK_HIERARCHY_INDEX = new Map<string, number>(
+  RANK_HIERARCHY.map((rank, index) => [normalizePersonnelName(rank), index])
+);
+const RANK_CEILING_INDEX = RANK_HIERARCHY_INDEX.get(normalizePersonnelName(RANK_CEILING)) ?? 16;
+
+type LookupDiagnostic = {
+  resolvedUserId: boolean;
+  groupRolesCallSucceeded: boolean;
+  matchingGroupFound: boolean;
+  resolvedRoleName: string | null;
+  error: string | null;
+  cappedFromRank?: string | null;
+};
+
+type SyncJobState = {
+  jobId: string;
+  groupId: string;
+  createdAt: string;
+  totalRequested: number;
+  bodyUsernamesRequested: number;
+  uniqueRequested: number;
+  usernames: string[];
+  cursor: number;
+  rankByUsername: Record<string, string>;
+  unresolvedUsernames: string[];
+  roleLookupFailures: string[];
+  lookupDiagnostics: Record<string, LookupDiagnostic>;
+  usernameLookupBatchDiagnostics: Array<any>;
+  sourceDiagnostics: {
+    rosterRows: number;
+    rosterProfileUsernames: number;
+    rosterCallsigns: number;
+    personnelRows: number;
+    personnelDirectoryRows: number;
+  };
+  sourceWarnings: string[];
+  exclusionsApplied: number;
+  exclusionsWarning: string | null;
+};
+
+function applyRankCeiling(rawRoleName?: string | null) {
+  const raw = String(rawRoleName || '').trim();
+  if (!raw) {
+    return { rank: 'Unranked', cappedFromRank: null as string | null };
+  }
+
+  const roleKey = normalizePersonnelName(raw);
+  const roleIndex = RANK_HIERARCHY_INDEX.get(roleKey);
+  if (roleIndex === undefined) {
+    console.warn(`[rank-ceiling] Unrecognized role name from Roblox: "${raw}"`);
+    return { rank: raw, cappedFromRank: null as string | null };
+  }
+
+  const canonicalRank = RANK_HIERARCHY[roleIndex];
+  if (roleIndex > RANK_CEILING_INDEX) {
+    return { rank: RANK_CEILING, cappedFromRank: canonicalRank };
+  }
+
+  return { rank: canonicalRank, cappedFromRank: null as string | null };
+}
 
 function chunk<T>(items: T[], size: number) {
   if (size <= 0) {
@@ -604,7 +704,7 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
   const entries = Array.from(userIdByUsername.entries());
   const rankByUsername: Record<string, string> = {};
   const roleLookupFailures: string[] = [];
-  const lookupDiagnostics: Record<string, { resolvedUserId: boolean; groupRolesCallSucceeded: boolean; matchingGroupFound: boolean; resolvedRoleName: string | null; error: string | null }> = {};
+  const lookupDiagnostics: Record<string, LookupDiagnostic> = {};
 
   unresolvedUsernames.forEach((username) => {
     const key = username.toLowerCase();
@@ -640,9 +740,14 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
       }
 
       const payload = await response.json().catch(() => ({}));
-      const groupRole = Array.isArray(payload?.data)
-        ? payload.data.find((entry: any) => String(entry?.group?.id) === String(groupId))
-        : null;
+      const matchingRoles = Array.isArray(payload?.data)
+        ? payload.data.filter((entry: any) => String(entry?.group?.id) === String(groupId))
+        : [];
+      const groupRole = matchingRoles.length > 0 ? matchingRoles[0] : null;
+
+      if (matchingRoles.length > 1) {
+        console.warn(`[bulk-group-ranks] ${usernameKey}: multiple roles matched same group id (${groupId}); using first match deterministically`);
+      }
 
       if (!groupRole?.role?.name) {
         return {
@@ -675,15 +780,21 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
         return;
       }
 
-      rankByUsername[result.usernameKey] = result.roleName;
+      const { rank: finalizedRank, cappedFromRank } = applyRankCeiling(result.roleName);
+      rankByUsername[result.usernameKey] = finalizedRank;
       lookupDiagnostics[result.usernameKey] = {
         resolvedUserId: true,
         groupRolesCallSucceeded: true,
         matchingGroupFound: true,
-        resolvedRoleName: result.roleName,
-        error: null
+        resolvedRoleName: finalizedRank,
+        error: null,
+        cappedFromRank
       };
-      console.log(`[bulk-group-ranks] ${result.usernameKey}: matched role "${result.roleName}"`);
+      if (cappedFromRank) {
+        console.log(`[bulk-group-ranks] ${result.usernameKey}: matched role "${result.roleName}" -> capped to "${finalizedRank}"`);
+      } else {
+        console.log(`[bulk-group-ranks] ${result.usernameKey}: matched role "${finalizedRank}"`);
+      }
     });
 
     if (index + BULK_ROLE_CONCURRENCY < entries.length) {
@@ -699,6 +810,45 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
     usernamesResolved: entries.length,
     lookupDiagnostics
   };
+}
+
+function normalizeUsernameKey(username: string) {
+  return String(username || '').trim().toLowerCase();
+}
+
+function buildSyncResponseFromJob(job: SyncJobState, status: 'in_progress' | 'complete') {
+  const failed = Array.from(new Set([
+    ...job.unresolvedUsernames.map((username) => normalizeUsernameKey(username)),
+    ...job.roleLookupFailures.map((username) => normalizeUsernameKey(username))
+  ]));
+
+  return {
+    status,
+    jobId: job.jobId,
+    groupId: job.groupId,
+    totalRequested: job.totalRequested,
+    bodyUsernamesRequested: job.bodyUsernamesRequested,
+    uniqueRequested: job.uniqueRequested,
+    processed: Math.min(job.cursor, job.usernames.length),
+    total: job.usernames.length,
+    cursorPosition: job.cursor,
+    usernamesResolved: Object.keys(job.rankByUsername).length,
+    unresolvedUsernames: job.unresolvedUsernames,
+    roleLookupFailures: job.roleLookupFailures,
+    usernameLookupBatchDiagnostics: job.usernameLookupBatchDiagnostics,
+    lookupDiagnostics: job.lookupDiagnostics,
+    rankByUsername: job.rankByUsername,
+    synced: Object.keys(job.rankByUsername).length,
+    failed,
+    sourceDiagnostics: job.sourceDiagnostics,
+    sourceWarnings: job.sourceWarnings,
+    exclusionsApplied: job.exclusionsApplied,
+    exclusionsWarning: job.exclusionsWarning
+  };
+}
+
+function createSyncJobId() {
+  return (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`).replace(/[^a-zA-Z0-9-]/g, '');
 }
 
 // Worker that serves static assets from the built-in assets binding and falls back to index.html for SPA routes
@@ -740,12 +890,16 @@ export default {
         const groupRole = Array.isArray(payload?.data)
           ? payload.data.find((entry: any) => String(entry?.group?.id) === String(groupId))
           : null;
+        const rawRoleName = groupRole?.role?.name ? String(groupRole.role.name) : null;
+        const finalized = applyRankCeiling(rawRoleName);
 
         return jsonResponse({
           robloxId: resolvedUserId,
           groupId,
-          rank: groupRole?.role?.name ? String(groupRole.role.name) : 'Unranked',
-          found: Boolean(groupRole?.role?.name)
+          rank: finalized.rank,
+          rawRank: rawRoleName,
+          cappedFromRank: finalized.cappedFromRank,
+          found: Boolean(rawRoleName)
         });
       } catch (error) {
         console.error('user-rank endpoint failed', error);
@@ -814,67 +968,157 @@ export default {
       }
 
       try {
-        const body = await request.json().catch(() => ({}));
-        const groupId = String(body.groupId || env.ROBLOX_GROUP_ID || '5531725');
-        const bodyUsernames: string[] = Array.isArray(body.usernames)
-          ? body.usernames.map((value: unknown) => String(value || '').trim()).filter(Boolean)
-          : [];
-
-        const sourceResult = await fetchSyncUsernamesFromSupabase(env);
-        const usernames = Array.from(new Set([
-          ...bodyUsernames,
-          ...sourceResult.usernames
-        ].map((value) => String(value || '').trim()).filter(Boolean)));
-
-        if (usernames.length === 0) {
-          return jsonResponse({ message: 'No usernames provided for rank sync.' }, 400);
+        const syncStore = env.SYNC_PROGRESS;
+        if (!syncStore || typeof syncStore.get !== 'function' || typeof syncStore.put !== 'function' || typeof syncStore.delete !== 'function') {
+          // Configure in wrangler.toml with a KV binding named SYNC_PROGRESS.
+          return jsonResponse({ message: 'Sync progress store is not configured. Bind KV namespace SYNC_PROGRESS first.' }, 500);
         }
 
-        const { excludedNames, warning: exclusionsWarning } = await fetchPersonnelExclusions(env);
-        const usernamesForSync = usernames.filter((username) => !excludedNames.has(normalizePersonnelName(username)));
+        const body = await request.json().catch(() => ({}));
+        const groupId = String(body.groupId || env.ROBLOX_GROUP_ID || '5531725');
+        const requestedJobId = String(body.jobId || '').trim();
 
-        if (usernamesForSync.length === 0) {
-          return jsonResponse({
+        let job: SyncJobState | null = null;
+
+        if (requestedJobId) {
+          const existing = await syncStore.get(`job:${requestedJobId}`);
+          if (!existing) {
+            return jsonResponse({ message: `No sync job found for id ${requestedJobId}.` }, 404);
+          }
+
+          job = JSON.parse(existing) as SyncJobState;
+          if (job.groupId !== groupId) {
+            job.groupId = groupId;
+          }
+        }
+
+        if (!job) {
+          const bodyUsernames: string[] = Array.isArray(body.usernames)
+            ? body.usernames.map((value: unknown) => String(value || '').trim()).filter(Boolean)
+            : [];
+
+          const sourceResult = await fetchSyncUsernamesFromSupabase(env);
+          const usernames = [
+            ...bodyUsernames,
+            ...sourceResult.usernames
+          ].map((value) => String(value || '').trim()).filter(Boolean);
+          const usernameByKey = new Map<string, string>();
+          usernames.forEach((username) => {
+            const key = normalizeUsernameKey(username);
+            if (key && !usernameByKey.has(key)) {
+              usernameByKey.set(key, username);
+            }
+          });
+          const uniqueUsernames = Array.from(usernameByKey.values());
+
+          if (uniqueUsernames.length === 0) {
+            return jsonResponse({ message: 'No usernames provided for rank sync.' }, 400);
+          }
+
+          const { excludedNames, warning: exclusionsWarning } = await fetchPersonnelExclusions(env);
+          const usernamesForSync = uniqueUsernames.filter((username) => !excludedNames.has(normalizePersonnelName(username)));
+
+          if (usernamesForSync.length === 0) {
+            return jsonResponse({
+              status: 'complete',
+              jobId: null,
+              groupId,
+              totalRequested: uniqueUsernames.length,
+              bodyUsernamesRequested: bodyUsernames.length,
+              uniqueRequested: 0,
+              processed: 0,
+              total: 0,
+              cursorPosition: 0,
+              usernamesResolved: 0,
+              unresolvedUsernames: [],
+              roleLookupFailures: [],
+              usernameLookupBatchDiagnostics: [],
+              lookupDiagnostics: {},
+              rankByUsername: {},
+              synced: 0,
+              failed: [],
+              sourceDiagnostics: sourceResult.diagnostics,
+              sourceWarnings: sourceResult.warnings,
+              exclusionsApplied: excludedNames.size,
+              exclusionsWarning
+            });
+          }
+
+          job = {
+            jobId: createSyncJobId(),
             groupId,
-            totalRequested: usernames.length,
+            createdAt: new Date().toISOString(),
+            totalRequested: uniqueUsernames.length,
             bodyUsernamesRequested: bodyUsernames.length,
-            uniqueRequested: 0,
-            usernamesResolved: 0,
+            uniqueRequested: Array.from(new Set(usernamesForSync.map((username) => normalizeUsernameKey(username)))).length,
+            usernames: usernamesForSync,
+            cursor: 0,
+            rankByUsername: {},
             unresolvedUsernames: [],
             roleLookupFailures: [],
-            rankByUsername: {},
-            synced: 0,
-            failed: [],
+            lookupDiagnostics: {},
+            usernameLookupBatchDiagnostics: [],
             sourceDiagnostics: sourceResult.diagnostics,
             sourceWarnings: sourceResult.warnings,
             exclusionsApplied: excludedNames.size,
             exclusionsWarning
+          };
+        }
+
+        const batchUsernames = job.usernames.slice(job.cursor, job.cursor + MAX_ROLE_LOOKUPS_PER_INVOCATION);
+        if (batchUsernames.length > 0) {
+          const result = await fetchBulkGroupRanks(batchUsernames, job.groupId);
+
+          Object.entries(result.rankByUsername || {}).forEach(([usernameKey, rank]) => {
+            const normalizedKey = normalizeUsernameKey(usernameKey);
+            if (normalizedKey) {
+              // Deterministic merge: one value per username key, last write wins.
+              job!.rankByUsername[normalizedKey] = String(rank);
+            }
+          });
+
+          const unresolvedSet = new Set(job.unresolvedUsernames.map((username) => normalizeUsernameKey(username)));
+          result.unresolvedUsernames.forEach((username) => {
+            const normalizedKey = normalizeUsernameKey(username);
+            if (normalizedKey) {
+              unresolvedSet.add(normalizedKey);
+            }
+          });
+          job.unresolvedUsernames = Array.from(unresolvedSet);
+
+          const failedRoleSet = new Set(job.roleLookupFailures.map((username) => normalizeUsernameKey(username)));
+          result.roleLookupFailures.forEach((username) => {
+            const normalizedKey = normalizeUsernameKey(username);
+            if (normalizedKey) {
+              failedRoleSet.add(normalizedKey);
+            }
+          });
+          job.roleLookupFailures = Array.from(failedRoleSet);
+
+          Object.entries(result.lookupDiagnostics || {}).forEach(([usernameKey, diagnostic]) => {
+            const normalizedKey = normalizeUsernameKey(usernameKey);
+            if (normalizedKey) {
+              job!.lookupDiagnostics[normalizedKey] = diagnostic as LookupDiagnostic;
+            }
+          });
+
+          job.usernameLookupBatchDiagnostics.push({
+            cursorStart: job.cursor,
+            cursorEndExclusive: job.cursor + batchUsernames.length,
+            usernamesRequested: batchUsernames.length,
+            batches: result.usernameLookupBatchDiagnostics || []
           });
         }
 
-        const result = await fetchBulkGroupRanks(usernamesForSync, groupId);
-        const failed = Array.from(new Set([
-          ...result.unresolvedUsernames,
-          ...result.roleLookupFailures
-        ]));
-        return jsonResponse({
-          groupId,
-          totalRequested: usernames.length,
-          bodyUsernamesRequested: bodyUsernames.length,
-          uniqueRequested: Array.from(new Set(usernamesForSync.map((username) => username.toLowerCase()))).length,
-          usernamesResolved: result.usernamesResolved,
-          unresolvedUsernames: result.unresolvedUsernames,
-          roleLookupFailures: result.roleLookupFailures,
-          usernameLookupBatchDiagnostics: result.usernameLookupBatchDiagnostics,
-          lookupDiagnostics: result.lookupDiagnostics,
-          rankByUsername: result.rankByUsername,
-          synced: result.usernamesResolved,
-          failed,
-          sourceDiagnostics: sourceResult.diagnostics,
-          sourceWarnings: sourceResult.warnings,
-          exclusionsApplied: excludedNames.size,
-          exclusionsWarning
-        });
+        job.cursor += batchUsernames.length;
+
+        if (job.cursor < job.usernames.length) {
+          await syncStore.put(`job:${job.jobId}`, JSON.stringify(job), { expirationTtl: SYNC_JOB_TTL_SECONDS });
+          return jsonResponse(buildSyncResponseFromJob(job, 'in_progress'));
+        }
+
+        await syncStore.delete(`job:${job.jobId}`);
+        return jsonResponse(buildSyncResponseFromJob(job, 'complete'));
       } catch {
         return jsonResponse({ message: 'Unable to sync Roblox ranks right now.' }, 500);
       }
