@@ -53,6 +53,9 @@ type BulkSyncResponse = {
   processed?: number;
   total?: number;
   cursorPosition?: number;
+  retryAfterSeconds?: number;
+  recommendedPollDelayMs?: number;
+  nextRecommendedPollAt?: string | null;
   groupId: string;
   totalRequested: number;
   uniqueRequested: number;
@@ -506,6 +509,16 @@ export default function PersonnelPage() {
     setSyncSummary(null);
 
     try {
+      const wait = async (ms: number) => {
+        const duration = Math.max(0, Math.floor(ms));
+        if (!duration) {
+          return;
+        }
+        await new Promise((resolve) => {
+          setTimeout(resolve, duration);
+        });
+      };
+
       const rowsWithUsernames = rosterRows
         .map((entry) => ({
           entry,
@@ -582,6 +595,14 @@ export default function PersonnelPage() {
 
         syncPayload = await syncResponse.json().catch(() => ({} as BulkSyncResponse));
         if (!syncResponse.ok) {
+          if (syncResponse.status === 429 && syncPayload?.status === 'in_progress' && syncPayload?.jobId) {
+            activeJobId = syncPayload.jobId;
+            const retryAfterSeconds = Number(syncPayload.retryAfterSeconds || 0);
+            const fallbackMs = Number(syncPayload.recommendedPollDelayMs || 0);
+            const delayMs = retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : Math.max(1000, fallbackMs);
+            await wait(delayMs);
+            continue;
+          }
           throw new Error(syncPayload?.message || 'Unable to sync Roblox ranks right now.');
         }
 
@@ -591,6 +612,10 @@ export default function PersonnelPage() {
 
         if (syncPayload?.status === 'in_progress' && syncPayload?.jobId) {
           activeJobId = syncPayload.jobId;
+          const nextDelayMs = Math.max(0, Number(syncPayload.recommendedPollDelayMs || 0));
+          if (nextDelayMs > 0) {
+            await wait(nextDelayMs);
+          }
           continue;
         }
 

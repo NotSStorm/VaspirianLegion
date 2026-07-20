@@ -1,7 +1,10 @@
-async function jsonResponse(payload: unknown, status = 200) {
+async function jsonResponse(payload: unknown, status = 200, extraHeaders?: Record<string, string>) {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { 'Content-Type': 'application/json' }
+    headers: {
+      'Content-Type': 'application/json',
+      ...(extraHeaders || {})
+    }
   });
 }
 
@@ -233,8 +236,10 @@ async function fetchRobloxAvatarImageUrl(input: { robloxId?: string | number | n
 
 const BULK_USERNAME_BATCH_SIZE = 100;
 const BULK_ROLE_CONCURRENCY = 2;
-const BULK_USERNAME_BATCH_DELAY_MS = 220;
+const BULK_USERNAME_BATCH_DELAY_MS = 1200;
+const BULK_USERNAME_THROTTLED_DELAY_MS = 6000;
 const SYNC_JOB_TTL_SECONDS = 15 * 60;
+const DEFAULT_SYNC_CONTINUATION_DELAY_MS = 4000;
 
 const DEFAULT_SUBREQUEST_BUDGET = 50;
 const MAX_FETCH_ATTEMPTS_PER_REQUEST = 3; // initial call + up to 2 retries
@@ -312,7 +317,29 @@ type SyncJobState = {
   sourceWarnings: string[];
   exclusionsApplied: number;
   exclusionsWarning: string | null;
+  nextRecommendedPollAt: string | null;
+  recommendedPollDelayMs: number;
 };
+
+function parseRetryAfterMs(retryAfterHeader: string | null, fallbackMs: number, maxDelayMs: number) {
+  const boundedFallbackMs = Math.min(Math.max(0, fallbackMs), maxDelayMs);
+  if (!retryAfterHeader) {
+    return boundedFallbackMs;
+  }
+
+  const seconds = Number(retryAfterHeader);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.min(Math.floor(seconds * 1000), maxDelayMs);
+  }
+
+  const absoluteTime = Date.parse(retryAfterHeader);
+  if (Number.isFinite(absoluteTime)) {
+    const delta = absoluteTime - Date.now();
+    return Math.min(Math.max(0, delta), maxDelayMs);
+  }
+
+  return boundedFallbackMs;
+}
 
 function applyRankCeiling(rawRoleName?: string | null) {
   const raw = String(rawRoleName || '').trim();
@@ -376,11 +403,16 @@ async function fetchWithRetry(
   retries: number,
   initialDelayMs: number,
   timeoutMs = 5000,
-  label = 'roblox-fetch'
+  label = 'roblox-fetch',
+  options?: {
+    maxRetryDelayMs?: number;
+  }
 ) {
   let attempt = 0;
   let delayMs = Math.max(100, initialDelayMs);
-  const maxDelayMs = 1500;
+  const maxDelayMs = Number.isFinite(options?.maxRetryDelayMs)
+    ? Math.max(500, Math.floor(Number(options?.maxRetryDelayMs)))
+    : 1500;
 
   while (attempt <= retries) {
     try {
@@ -395,10 +427,7 @@ async function fetchWithRetry(
       }
 
       const retryAfterHeader = response.headers.get('retry-after');
-      const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : Number.NaN;
-      const retryDelay = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
-        ? Math.min(retryAfterSeconds * 1000, maxDelayMs)
-        : Math.min(delayMs, maxDelayMs);
+      const retryDelay = parseRetryAfterMs(retryAfterHeader, Math.min(delayMs, maxDelayMs), maxDelayMs);
       console.warn(`[${label}] retrying after status ${response.status} with delay ${retryDelay}ms`);
       await sleep(retryDelay);
     } catch (error) {
@@ -594,9 +623,11 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
     batchIndex: number;
     batchSize: number;
     status: number | null;
+    retryAfterHeader: string | null;
     resolvedInBatch: number;
     unresolvedInBatch: number;
     responsePreview: string;
+    pacingDelayMs: number;
   }> = [];
 
   const usernameBatches = chunk(uniqueUsernames, BULK_USERNAME_BATCH_SIZE);
@@ -613,10 +644,11 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ usernames: usernameBatch, excludeBannedUsers: false })
         },
-        2,
-        300,
+        1,
+        1200,
         8000,
-        'bulk-user-ids'
+        'bulk-user-ids',
+        { maxRetryDelayMs: 15000 }
       );
     } catch {
       usernameBatch.forEach((username) => unresolvedUsernames.add(username));
@@ -624,33 +656,42 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
         batchIndex: batchIndex + 1,
         batchSize: usernameBatch.length,
         status: null,
+        retryAfterHeader: null,
         resolvedInBatch: 0,
         unresolvedInBatch: usernameBatch.length,
-        responsePreview: 'request_failed_or_timed_out'
+        responsePreview: 'request_failed_or_timed_out',
+        pacingDelayMs: BULK_USERNAME_THROTTLED_DELAY_MS
       });
       if (batchIndex + 1 < usernameBatches.length) {
-        await sleep(BULK_USERNAME_BATCH_DELAY_MS);
+        await sleep(BULK_USERNAME_THROTTLED_DELAY_MS);
       }
       continue;
     }
 
     const responsePreview = await response.clone().text().then((text) => text.slice(0, 500)).catch(() => 'unable_to_read_response');
+    const retryAfterHeader = response.headers.get('retry-after');
+    const statusIs429 = response.status === 429;
+    const pacingDelayMs = statusIs429
+      ? Math.max(BULK_USERNAME_BATCH_DELAY_MS, parseRetryAfterMs(retryAfterHeader, BULK_USERNAME_THROTTLED_DELAY_MS, 30000))
+      : BULK_USERNAME_BATCH_DELAY_MS;
 
     console.log(`[bulk-user-ids] batch ${batchIndex + 1}/${usernameBatches.length} status ${response.status}`);
 
     if (!response.ok) {
       usernameBatch.forEach((username) => unresolvedUsernames.add(username));
-      console.warn(`[bulk-user-ids] batch ${batchIndex + 1} failed with body: ${responsePreview}`);
+      console.warn(`[bulk-user-ids] batch ${batchIndex + 1} failed with status ${response.status}, retry-after="${retryAfterHeader || ''}", body: ${responsePreview}`);
       batchDiagnostics.push({
         batchIndex: batchIndex + 1,
         batchSize: usernameBatch.length,
         status: response.status,
+        retryAfterHeader,
         resolvedInBatch: 0,
         unresolvedInBatch: usernameBatch.length,
-        responsePreview
+        responsePreview,
+        pacingDelayMs
       });
       if (batchIndex + 1 < usernameBatches.length) {
-        await sleep(BULK_USERNAME_BATCH_DELAY_MS);
+        await sleep(pacingDelayMs);
       }
       continue;
     }
@@ -682,13 +723,15 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
       batchIndex: batchIndex + 1,
       batchSize: usernameBatch.length,
       status: response.status,
+      retryAfterHeader,
       resolvedInBatch: seenInBatch.size,
       unresolvedInBatch,
-      responsePreview
+      responsePreview,
+      pacingDelayMs
     });
 
     if (batchIndex + 1 < usernameBatches.length) {
-      await sleep(BULK_USERNAME_BATCH_DELAY_MS);
+      await sleep(pacingDelayMs);
     }
   }
 
@@ -843,7 +886,10 @@ function buildSyncResponseFromJob(job: SyncJobState, status: 'in_progress' | 'co
     sourceDiagnostics: job.sourceDiagnostics,
     sourceWarnings: job.sourceWarnings,
     exclusionsApplied: job.exclusionsApplied,
-    exclusionsWarning: job.exclusionsWarning
+    exclusionsWarning: job.exclusionsWarning,
+    nextRecommendedPollAt: job.nextRecommendedPollAt,
+    recommendedPollDelayMs: job.recommendedPollDelayMs,
+    retryAfterSeconds: Math.max(1, Math.ceil(job.recommendedPollDelayMs / 1000))
   };
 }
 
@@ -879,6 +925,15 @@ function computeMaxRoleLookupsPerInvocation(env: any) {
   }
 
   return computed;
+}
+
+function computeSyncContinuationDelayMs(env: any) {
+  const configured = Number(env.SYNC_CONTINUATION_DELAY_MS || '');
+  if (Number.isFinite(configured) && configured >= 0) {
+    return Math.max(0, Math.floor(configured));
+  }
+
+  return DEFAULT_SYNC_CONTINUATION_DELAY_MS;
 }
 
 // Worker that serves static assets from the built-in assets binding and falls back to index.html for SPA routes
@@ -1009,6 +1064,8 @@ export default {
         const requestedJobId = String(body.jobId || '').trim();
 
         let job: SyncJobState | null = null;
+        const continuationDelayMs = computeSyncContinuationDelayMs(env);
+        const nowMs = Date.now();
 
         if (requestedJobId) {
           const existing = await syncStore.get(`job:${requestedJobId}`);
@@ -1019,6 +1076,20 @@ export default {
           job = JSON.parse(existing) as SyncJobState;
           if (job.groupId !== groupId) {
             job.groupId = groupId;
+          }
+
+          const nextAllowedAtMs = job.nextRecommendedPollAt ? Date.parse(job.nextRecommendedPollAt) : Number.NaN;
+          if (Number.isFinite(nextAllowedAtMs) && nowMs < nextAllowedAtMs) {
+            const retryAfterMs = Math.max(0, nextAllowedAtMs - nowMs);
+            job.recommendedPollDelayMs = retryAfterMs;
+            return jsonResponse(
+              {
+                ...buildSyncResponseFromJob(job, 'in_progress'),
+                message: 'Sync continuation called too soon. Wait before requesting the next step.'
+              },
+              429,
+              { 'Retry-After': String(Math.max(1, Math.ceil(retryAfterMs / 1000))) }
+            );
           }
         }
 
@@ -1070,7 +1141,9 @@ export default {
               sourceDiagnostics: sourceResult.diagnostics,
               sourceWarnings: sourceResult.warnings,
               exclusionsApplied: excludedNames.size,
-              exclusionsWarning
+              exclusionsWarning,
+              nextRecommendedPollAt: null,
+              recommendedPollDelayMs: continuationDelayMs
             });
           }
 
@@ -1091,12 +1164,15 @@ export default {
             sourceDiagnostics: sourceResult.diagnostics,
             sourceWarnings: sourceResult.warnings,
             exclusionsApplied: excludedNames.size,
-            exclusionsWarning
+            exclusionsWarning,
+            nextRecommendedPollAt: null,
+            recommendedPollDelayMs: continuationDelayMs
           };
         }
 
         const maxRoleLookupsPerInvocation = computeMaxRoleLookupsPerInvocation(env);
-        const batchUsernames = job.usernames.slice(job.cursor, job.cursor + maxRoleLookupsPerInvocation);
+        const usernamesPerStep = Math.max(1, Math.min(maxRoleLookupsPerInvocation, BULK_USERNAME_BATCH_SIZE));
+        const batchUsernames = job.usernames.slice(job.cursor, job.cursor + usernamesPerStep);
         if (batchUsernames.length > 0) {
           const result = await fetchBulkGroupRanks(batchUsernames, job.groupId);
 
@@ -1144,10 +1220,13 @@ export default {
         job.cursor += batchUsernames.length;
 
         if (job.cursor < job.usernames.length) {
+          job.recommendedPollDelayMs = continuationDelayMs;
+          job.nextRecommendedPollAt = new Date(Date.now() + continuationDelayMs).toISOString();
           await syncStore.put(`job:${job.jobId}`, JSON.stringify(job), { expirationTtl: SYNC_JOB_TTL_SECONDS });
           return jsonResponse(buildSyncResponseFromJob(job, 'in_progress'));
         }
 
+        job.nextRecommendedPollAt = null;
         await syncStore.delete(`job:${job.jobId}`);
         return jsonResponse(buildSyncResponseFromJob(job, 'complete'));
       } catch {
