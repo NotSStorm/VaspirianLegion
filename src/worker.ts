@@ -241,6 +241,7 @@ const BULK_USERNAME_THROTTLED_DELAY_MS = 10000;
 const BULK_USERNAME_MAX_ATTEMPTS = 3;
 const BULK_USERNAME_INITIAL_RETRY_DELAY_MS = 3000;
 const BULK_USERNAME_MAX_RETRY_DELAY_MS = 30000;
+const BULK_USERNAME_INITIAL_BATCH_DELAY_MS = 2500;
 const SYNC_JOB_TTL_SECONDS = 15 * 60;
 const DEFAULT_SYNC_CONTINUATION_DELAY_MS = 4000;
 
@@ -502,7 +503,7 @@ async function fetchSyncUsernamesFromSupabase(env: any) {
   if (!supabaseUrl || !serviceRoleKey) {
     return {
       usernames: [] as string[],
-      warnings: ['Supabase source lookup skipped: missing env.SUPABASE_URL or env.SUPABASE_SERVICE_ROLE_KEY in this Worker runtime.'],
+      warnings: ['Info: Worker-side Supabase source lookup skipped (missing env.SUPABASE_URL or env.SUPABASE_SERVICE_ROLE_KEY in this Worker runtime).'],
       diagnostics: {
         rosterRows: 0,
         rosterProfileUsernames: 0,
@@ -625,6 +626,7 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
   const batchDiagnostics: Array<{
     batchIndex: number;
     batchSize: number;
+    attempts: number;
     status: number | null;
     retryAfterHeader: string | null;
     resolvedInBatch: number;
@@ -636,6 +638,11 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
   const usernameBatches = chunk(uniqueUsernames, BULK_USERNAME_BATCH_SIZE);
 
   for (let batchIndex = 0; batchIndex < usernameBatches.length; batchIndex += 1) {
+    if (batchIndex === 0 && BULK_USERNAME_INITIAL_BATCH_DELAY_MS > 0) {
+      // Add slight warm-up delay so first bulk call is less likely to trip upstream burst limiting.
+      await sleep(BULK_USERNAME_INITIAL_BATCH_DELAY_MS);
+    }
+
     const usernameBatch = usernameBatches[batchIndex];
     console.log(`[bulk-user-ids] processing batch ${batchIndex + 1}/${usernameBatches.length} with size ${usernameBatch.length}`);
     let response: Response | null = null;
@@ -704,6 +711,7 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
       batchDiagnostics.push({
         batchIndex: batchIndex + 1,
         batchSize: usernameBatch.length,
+        attempts: attempt,
         status: response?.status ?? null,
         retryAfterHeader,
         resolvedInBatch: 0,
@@ -743,6 +751,7 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
     batchDiagnostics.push({
       batchIndex: batchIndex + 1,
       batchSize: usernameBatch.length,
+      attempts: attempt,
       status: response.status,
       retryAfterHeader,
       resolvedInBatch: seenInBatch.size,
@@ -1151,8 +1160,12 @@ export default {
             });
           }
 
-          if (sourceWarnings.some((warning) => /missing env\.SUPABASE_URL|missing env\.SUPABASE_SERVICE_ROLE_KEY/i.test(warning)) && bodyUsernames.length > 0) {
-            sourceWarnings.push('Server-side Supabase username sourcing was skipped, but request-body usernames were still processed for rank sync.');
+          const workerSourceMissingWarningMatcher = /missing env\.SUPABASE_URL|missing env\.SUPABASE_SERVICE_ROLE_KEY/i;
+          if (bodyUsernames.length > 0) {
+            const filteredWarnings = sourceWarnings.filter((warning) => !workerSourceMissingWarningMatcher.test(warning));
+            filteredWarnings.push('Info: Using request-body usernames for sync; Worker-side Supabase username sourcing was skipped.');
+            sourceWarnings.length = 0;
+            sourceWarnings.push(...filteredWarnings);
           }
 
           const userIdResolution = await resolveRobloxUserIdsInBulk(usernamesForSync);
