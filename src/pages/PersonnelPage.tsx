@@ -648,6 +648,8 @@ export default function PersonnelPage() {
 
       const nowIso = new Date().toISOString();
 
+      const rosterUpdates: Array<{ entry: RosterRecord; username: string; resolvedRank: string }> = [];
+
       for (const { entry, username } of rowsWithUsernames) {
         const usernameKey = username.toLowerCase();
         const rawResolvedRank = rankByUsername.get(usernameKey);
@@ -670,18 +672,73 @@ export default function PersonnelPage() {
           continue;
         }
 
-        const { error } = await supabase
-          .from('roster')
-          .update({ group_rank: resolvedRank })
-          .eq('profile_id', entry.profile_id);
+        rosterUpdates.push({ entry, username, resolvedRank });
+      }
 
-        if (error) {
-          failedProfileUpdates.push(username);
-          continue;
+      if (rosterUpdates.length > 0) {
+        const updatesWithRosterId = rosterUpdates.filter(({ entry }) => Boolean(String(entry.id || '').trim()));
+        const noIdRosterUpdates = rosterUpdates.filter(({ entry }) => !String(entry.id || '').trim());
+
+        const bulkRosterRows = updatesWithRosterId
+          .map(({ entry, resolvedRank }) => ({
+            id: entry.id,
+            profile_id: entry.profile_id,
+            group_rank: resolvedRank
+          }))
+          .filter((row): row is { id: string; profile_id: string; group_rank: string } => Boolean(row.id));
+
+        if (bulkRosterRows.length > 0) {
+          const { error: bulkRosterError } = await supabase
+            .from('roster')
+            .upsert(bulkRosterRows, { onConflict: 'id' });
+
+          if (!bulkRosterError) {
+            rosterRanksUpdated += bulkRosterRows.length;
+          } else {
+            for (const { entry, username, resolvedRank } of updatesWithRosterId) {
+              const rosterId = String(entry.id || '').trim();
+              const updateQuery = supabase.from('roster').update({ group_rank: resolvedRank });
+              const { error } = rosterId
+                ? await updateQuery.eq('id', rosterId)
+                : await updateQuery.eq('profile_id', entry.profile_id);
+
+              if (error) {
+                failedProfileUpdates.push(username);
+                continue;
+              }
+
+              rosterRanksUpdated += 1;
+            }
+          }
         }
 
-        rosterRanksUpdated += 1;
+        if (noIdRosterUpdates.length > 0) {
+          for (const { entry, username, resolvedRank } of noIdRosterUpdates) {
+            const { error } = await supabase
+              .from('roster')
+              .update({ group_rank: resolvedRank })
+              .eq('profile_id', entry.profile_id);
+
+            if (error) {
+              failedProfileUpdates.push(username);
+              continue;
+            }
+
+            rosterRanksUpdated += 1;
+          }
+        }
       }
+
+      const personnelUpsertRows: Array<{
+        username: string;
+        payload: {
+          roblox_username: string;
+          rank: string;
+          unit: string;
+          last_rank_sync_at: string;
+          updated_at: string;
+        };
+      }> = [];
 
       for (const username of uniqueUsernames) {
         const usernameKey = username.toLowerCase();
@@ -706,22 +763,39 @@ export default function PersonnelPage() {
           continue;
         }
 
-        const { error } = await supabase
-          .from('personnel')
-          .upsert({
+        personnelUpsertRows.push({
+          username,
+          payload: {
             roblox_username: existingDirectory?.roblox_username || username,
             rank: resolvedRank,
             unit: existingDirectory?.unit || 'Unassigned',
             last_rank_sync_at: nowIso,
             updated_at: nowIso
-          }, { onConflict: 'roblox_username' });
+          }
+        });
+      }
 
-        if (error) {
-          failedPersonnelUpdates.push(username);
-          continue;
+      if (personnelUpsertRows.length > 0) {
+        const { error: bulkPersonnelError } = await supabase
+          .from('personnel')
+          .upsert(personnelUpsertRows.map((entry) => entry.payload), { onConflict: 'roblox_username' });
+
+        if (!bulkPersonnelError) {
+          personnelRanksUpdated += personnelUpsertRows.length;
+        } else {
+          for (const { username, payload } of personnelUpsertRows) {
+            const { error } = await supabase
+              .from('personnel')
+              .upsert(payload, { onConflict: 'roblox_username' });
+
+            if (error) {
+              failedPersonnelUpdates.push(username);
+              continue;
+            }
+
+            personnelRanksUpdated += 1;
+          }
         }
-
-        personnelRanksUpdated += 1;
       }
 
       setSyncSummary({
