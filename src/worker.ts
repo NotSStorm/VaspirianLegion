@@ -233,6 +233,7 @@ async function fetchRobloxAvatarImageUrl(input: { robloxId?: string | number | n
 
 const BULK_USERNAME_BATCH_SIZE = 100;
 const BULK_ROLE_CONCURRENCY = 2;
+const BULK_USERNAME_BATCH_DELAY_MS = 220;
 
 function chunk<T>(items: T[], size: number) {
   if (size <= 0) {
@@ -489,9 +490,20 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
   const uniqueUsernames = Array.from(new Set(usernames.map((username) => username.trim()).filter(Boolean)));
   const userIdByUsername = new Map<string, string>();
   const unresolvedUsernames = new Set<string>();
+  const batchDiagnostics: Array<{
+    batchIndex: number;
+    batchSize: number;
+    status: number | null;
+    resolvedInBatch: number;
+    unresolvedInBatch: number;
+    responsePreview: string;
+  }> = [];
 
-  for (const usernameBatch of chunk(uniqueUsernames, BULK_USERNAME_BATCH_SIZE)) {
-    console.log(`[bulk-user-ids] processing batch size ${usernameBatch.length}`);
+  const usernameBatches = chunk(uniqueUsernames, BULK_USERNAME_BATCH_SIZE);
+
+  for (let batchIndex = 0; batchIndex < usernameBatches.length; batchIndex += 1) {
+    const usernameBatch = usernameBatches[batchIndex];
+    console.log(`[bulk-user-ids] processing batch ${batchIndex + 1}/${usernameBatches.length} with size ${usernameBatch.length}`);
     let response: Response;
     try {
       response = await fetchWithRetry(
@@ -501,18 +513,45 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ usernames: usernameBatch, excludeBannedUsers: false })
         },
-        1,
+        2,
         300,
-        4500,
+        8000,
         'bulk-user-ids'
       );
     } catch {
       usernameBatch.forEach((username) => unresolvedUsernames.add(username));
+      batchDiagnostics.push({
+        batchIndex: batchIndex + 1,
+        batchSize: usernameBatch.length,
+        status: null,
+        resolvedInBatch: 0,
+        unresolvedInBatch: usernameBatch.length,
+        responsePreview: 'request_failed_or_timed_out'
+      });
+      if (batchIndex + 1 < usernameBatches.length) {
+        await sleep(BULK_USERNAME_BATCH_DELAY_MS);
+      }
       continue;
     }
 
+    const responsePreview = await response.clone().text().then((text) => text.slice(0, 500)).catch(() => 'unable_to_read_response');
+
+    console.log(`[bulk-user-ids] batch ${batchIndex + 1}/${usernameBatches.length} status ${response.status}`);
+
     if (!response.ok) {
       usernameBatch.forEach((username) => unresolvedUsernames.add(username));
+      console.warn(`[bulk-user-ids] batch ${batchIndex + 1} failed with body: ${responsePreview}`);
+      batchDiagnostics.push({
+        batchIndex: batchIndex + 1,
+        batchSize: usernameBatch.length,
+        status: response.status,
+        resolvedInBatch: 0,
+        unresolvedInBatch: usernameBatch.length,
+        responsePreview
+      });
+      if (batchIndex + 1 < usernameBatches.length) {
+        await sleep(BULK_USERNAME_BATCH_DELAY_MS);
+      }
       continue;
     }
 
@@ -537,16 +576,31 @@ async function resolveRobloxUserIdsInBulk(usernames: string[]) {
         unresolvedUsernames.add(username);
       }
     });
+
+    const unresolvedInBatch = usernameBatch.length - seenInBatch.size;
+    batchDiagnostics.push({
+      batchIndex: batchIndex + 1,
+      batchSize: usernameBatch.length,
+      status: response.status,
+      resolvedInBatch: seenInBatch.size,
+      unresolvedInBatch,
+      responsePreview
+    });
+
+    if (batchIndex + 1 < usernameBatches.length) {
+      await sleep(BULK_USERNAME_BATCH_DELAY_MS);
+    }
   }
 
   return {
     userIdByUsername,
-    unresolvedUsernames: Array.from(unresolvedUsernames)
+    unresolvedUsernames: Array.from(unresolvedUsernames),
+    batchDiagnostics
   };
 }
 
 async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
-  const { userIdByUsername, unresolvedUsernames } = await resolveRobloxUserIdsInBulk(usernames);
+  const { userIdByUsername, unresolvedUsernames, batchDiagnostics } = await resolveRobloxUserIdsInBulk(usernames);
   const entries = Array.from(userIdByUsername.entries());
   const rankByUsername: Record<string, string> = {};
   const roleLookupFailures: string[] = [];
@@ -640,6 +694,7 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
   return {
     rankByUsername,
     unresolvedUsernames,
+    usernameLookupBatchDiagnostics: batchDiagnostics,
     roleLookupFailures,
     usernamesResolved: entries.length,
     lookupDiagnostics
@@ -810,6 +865,7 @@ export default {
           usernamesResolved: result.usernamesResolved,
           unresolvedUsernames: result.unresolvedUsernames,
           roleLookupFailures: result.roleLookupFailures,
+          usernameLookupBatchDiagnostics: result.usernameLookupBatchDiagnostics,
           lookupDiagnostics: result.lookupDiagnostics,
           rankByUsername: result.rankByUsername,
           synced: result.usernamesResolved,
