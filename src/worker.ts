@@ -236,11 +236,11 @@ const BULK_ROLE_CONCURRENCY = 2;
 const BULK_USERNAME_BATCH_DELAY_MS = 220;
 const SYNC_JOB_TTL_SECONDS = 15 * 60;
 
-// Free-plan budget math (worst case):
-// - Username resolution for one invocation batch: up to 1 request * 3 attempts = 3
-// - Role lookups for N users: N requests * 3 attempts
-// To stay < 50 consistently, pick N=12 => 3 + (12*3) = 39, leaving headroom.
-const MAX_ROLE_LOOKUPS_PER_INVOCATION = 12;
+const DEFAULT_SUBREQUEST_BUDGET = 50;
+const MAX_FETCH_ATTEMPTS_PER_REQUEST = 3; // initial call + up to 2 retries
+const USERNAME_LOOKUP_REQUESTS_PER_INVOCATION = 1;
+const SUBREQUEST_SAFETY_HEADROOM = 8;
+const DEFAULT_MAX_ROLE_LOOKUPS_PER_INVOCATION = 12;
 
 const RANK_HIERARCHY = [
   'Conscript',
@@ -851,6 +851,36 @@ function createSyncJobId() {
   return (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`).replace(/[^a-zA-Z0-9-]/g, '');
 }
 
+function computeMaxRoleLookupsPerInvocation(env: any) {
+  const configured = Number(env.MAX_ROLE_LOOKUPS_PER_INVOCATION || '');
+  if (Number.isFinite(configured) && configured > 0) {
+    return Math.max(1, Math.floor(configured));
+  }
+
+  const configuredBudget = Number(env.SUBREQUEST_BUDGET || '');
+  const subrequestBudget = Number.isFinite(configuredBudget) && configuredBudget > 0
+    ? Math.floor(configuredBudget)
+    : DEFAULT_SUBREQUEST_BUDGET;
+
+  // Worst case budget model per invocation:
+  // username lookup: USERNAME_LOOKUP_REQUESTS_PER_INVOCATION * MAX_FETCH_ATTEMPTS_PER_REQUEST
+  // role lookups:   N * MAX_FETCH_ATTEMPTS_PER_REQUEST
+  // plus fixed safety headroom for future overhead.
+  const remainingBudget = Math.max(
+    1,
+    subrequestBudget
+      - SUBREQUEST_SAFETY_HEADROOM
+      - (USERNAME_LOOKUP_REQUESTS_PER_INVOCATION * MAX_FETCH_ATTEMPTS_PER_REQUEST)
+  );
+
+  const computed = Math.floor(remainingBudget / MAX_FETCH_ATTEMPTS_PER_REQUEST);
+  if (!Number.isFinite(computed) || computed <= 0) {
+    return DEFAULT_MAX_ROLE_LOOKUPS_PER_INVOCATION;
+  }
+
+  return computed;
+}
+
 // Worker that serves static assets from the built-in assets binding and falls back to index.html for SPA routes
 export default {
   async fetch(request: Request, env: any) {
@@ -1065,7 +1095,8 @@ export default {
           };
         }
 
-        const batchUsernames = job.usernames.slice(job.cursor, job.cursor + MAX_ROLE_LOOKUPS_PER_INVOCATION);
+        const maxRoleLookupsPerInvocation = computeMaxRoleLookupsPerInvocation(env);
+        const batchUsernames = job.usernames.slice(job.cursor, job.cursor + maxRoleLookupsPerInvocation);
         if (batchUsernames.length > 0) {
           const result = await fetchBulkGroupRanks(batchUsernames, job.groupId);
 
