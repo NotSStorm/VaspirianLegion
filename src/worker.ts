@@ -149,7 +149,7 @@ async function verifyRobloxGroupRole(username: string, groupUrl: string, env: an
     const userId = usernameCheck.robloxId;
 
     const rolesResponse = await fetchWithRetry(
-      `https://users.roblox.com/v1/users/${encodeURIComponent(String(userId))}/groups/roles`,
+      `https://groups.roblox.com/v2/users/${encodeURIComponent(String(userId))}/groups/roles`,
       { method: 'GET' },
       2,
       300,
@@ -363,6 +363,128 @@ async function fetchPersonnelExclusions(env: any) {
   }
 }
 
+async function fetchSyncUsernamesFromSupabase(env: any) {
+  const supabaseUrl = String(env.SUPABASE_URL || '').trim();
+  const serviceRoleKey = String(env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  if (!supabaseUrl || !serviceRoleKey) {
+    return {
+      usernames: [] as string[],
+      warnings: ['Supabase source lookup skipped: missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY.'],
+      diagnostics: {
+        rosterRows: 0,
+        rosterProfileUsernames: 0,
+        rosterCallsigns: 0,
+        personnelRows: 0,
+        personnelDirectoryRows: 0
+      }
+    };
+  }
+
+  const headers = {
+    apikey: serviceRoleKey,
+    Authorization: `Bearer ${serviceRoleKey}`
+  };
+
+  const warnings: string[] = [];
+  const usernames = new Set<string>();
+  const diagnostics = {
+    rosterRows: 0,
+    rosterProfileUsernames: 0,
+    rosterCallsigns: 0,
+    personnelRows: 0,
+    personnelDirectoryRows: 0
+  };
+
+  try {
+    const rosterResponse = await fetchWithTimeout(
+      `${supabaseUrl}/rest/v1/roster?select=callsign,profile:profiles!roster_profile_id_fkey(roblox_username)&limit=2000`,
+      { method: 'GET', headers },
+      6000
+    );
+
+    if (!rosterResponse.ok) {
+      warnings.push(`Roster source lookup failed (${rosterResponse.status}).`);
+    } else {
+      const rosterPayload = await rosterResponse.json().catch(() => []);
+      if (Array.isArray(rosterPayload)) {
+        diagnostics.rosterRows = rosterPayload.length;
+        rosterPayload.forEach((row: any) => {
+          const profileRaw = row?.profile;
+          const profile = Array.isArray(profileRaw) ? profileRaw[0] : profileRaw;
+          const profileUsername = String(profile?.roblox_username || '').trim();
+          const callsignUsername = String(row?.callsign || '').trim();
+
+          if (profileUsername) {
+            usernames.add(profileUsername);
+            diagnostics.rosterProfileUsernames += 1;
+          }
+
+          if (callsignUsername) {
+            usernames.add(callsignUsername);
+            diagnostics.rosterCallsigns += 1;
+          }
+        });
+      }
+    }
+  } catch {
+    warnings.push('Roster source lookup failed due to timeout/network issue.');
+  }
+
+  try {
+    const personnelResponse = await fetchWithTimeout(
+      `${supabaseUrl}/rest/v1/personnel?select=roblox_username&limit=2000`,
+      { method: 'GET', headers },
+      6000
+    );
+
+    if (!personnelResponse.ok) {
+      warnings.push(`Personnel source lookup failed (${personnelResponse.status}).`);
+    } else {
+      const personnelPayload = await personnelResponse.json().catch(() => []);
+      if (Array.isArray(personnelPayload)) {
+        diagnostics.personnelRows = personnelPayload.length;
+        personnelPayload.forEach((row: any) => {
+          const username = String(row?.roblox_username || '').trim();
+          if (username) {
+            usernames.add(username);
+          }
+        });
+      }
+    }
+  } catch {
+    warnings.push('Personnel source lookup failed due to timeout/network issue.');
+  }
+
+  try {
+    const directoryResponse = await fetchWithTimeout(
+      `${supabaseUrl}/rest/v1/personnel_directory?select=roblox_username&limit=2000`,
+      { method: 'GET', headers },
+      6000
+    );
+
+    if (directoryResponse.ok) {
+      const directoryPayload = await directoryResponse.json().catch(() => []);
+      if (Array.isArray(directoryPayload)) {
+        diagnostics.personnelDirectoryRows = directoryPayload.length;
+        directoryPayload.forEach((row: any) => {
+          const username = String(row?.roblox_username || '').trim();
+          if (username) {
+            usernames.add(username);
+          }
+        });
+      }
+    }
+  } catch {
+    // Optional source; ignore failures silently.
+  }
+
+  return {
+    usernames: Array.from(usernames),
+    warnings,
+    diagnostics
+  };
+}
+
 async function resolveRobloxUserIdsInBulk(usernames: string[]) {
   const uniqueUsernames = Array.from(new Set(usernames.map((username) => username.trim()).filter(Boolean)));
   const userIdByUsername = new Map<string, string>();
@@ -448,7 +570,7 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
       let response: Response;
       try {
         response = await fetchWithRetry(
-          `https://users.roblox.com/v1/users/${encodeURIComponent(userId)}/groups/roles`,
+          `https://groups.roblox.com/v2/users/${encodeURIComponent(userId)}/groups/roles`,
           { method: 'GET' },
           2,
           300,
@@ -547,7 +669,7 @@ export default {
         }
 
         const response = await fetchWithRetry(
-          `https://users.roblox.com/v1/users/${encodeURIComponent(resolvedUserId)}/groups/roles`,
+          `https://groups.roblox.com/v2/users/${encodeURIComponent(resolvedUserId)}/groups/roles`,
           { method: 'GET' },
           2,
           300,
@@ -639,9 +761,15 @@ export default {
       try {
         const body = await request.json().catch(() => ({}));
         const groupId = String(body.groupId || env.ROBLOX_GROUP_ID || '5531725');
-        const usernames: string[] = Array.isArray(body.usernames)
+        const bodyUsernames: string[] = Array.isArray(body.usernames)
           ? body.usernames.map((value: unknown) => String(value || '').trim()).filter(Boolean)
           : [];
+
+        const sourceResult = await fetchSyncUsernamesFromSupabase(env);
+        const usernames = Array.from(new Set([
+          ...bodyUsernames,
+          ...sourceResult.usernames
+        ].map((value) => String(value || '').trim()).filter(Boolean)));
 
         if (usernames.length === 0) {
           return jsonResponse({ message: 'No usernames provided for rank sync.' }, 400);
@@ -654,6 +782,7 @@ export default {
           return jsonResponse({
             groupId,
             totalRequested: usernames.length,
+            bodyUsernamesRequested: bodyUsernames.length,
             uniqueRequested: 0,
             usernamesResolved: 0,
             unresolvedUsernames: [],
@@ -661,6 +790,8 @@ export default {
             rankByUsername: {},
             synced: 0,
             failed: [],
+            sourceDiagnostics: sourceResult.diagnostics,
+            sourceWarnings: sourceResult.warnings,
             exclusionsApplied: excludedNames.size,
             exclusionsWarning
           });
@@ -674,6 +805,7 @@ export default {
         return jsonResponse({
           groupId,
           totalRequested: usernames.length,
+          bodyUsernamesRequested: bodyUsernames.length,
           uniqueRequested: Array.from(new Set(usernamesForSync.map((username) => username.toLowerCase()))).length,
           usernamesResolved: result.usernamesResolved,
           unresolvedUsernames: result.unresolvedUsernames,
@@ -682,6 +814,8 @@ export default {
           rankByUsername: result.rankByUsername,
           synced: result.usernamesResolved,
           failed,
+          sourceDiagnostics: sourceResult.diagnostics,
+          sourceWarnings: sourceResult.warnings,
           exclusionsApplied: excludedNames.size,
           exclusionsWarning
         });

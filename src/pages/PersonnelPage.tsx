@@ -121,7 +121,12 @@ type RosterRecord = {
     roblox_id?: string | null;
     discord_username?: string | null;
     callsign?: string | null;
-  } | null;
+  } | Array<{
+    roblox_username?: string | null;
+    roblox_id?: string | null;
+    discord_username?: string | null;
+    callsign?: string | null;
+  }> | null;
 };
 
 type PersonnelDirectoryRecord = {
@@ -242,6 +247,19 @@ export default function PersonnelPage() {
     .map((value) => normalizeName(value))
     .filter(Boolean);
 
+  const resolveRosterProfile = (profile: RosterRecord['profile']) => {
+    if (!profile) {
+      return null;
+    }
+
+    return Array.isArray(profile) ? (profile[0] || null) : profile;
+  };
+
+  const resolveRosterUsername = (entry: RosterRecord) => {
+    const profile = resolveRosterProfile(entry.profile);
+    return String(profile?.roblox_username || entry.callsign || profile?.discord_username || '').trim();
+  };
+
   const loadPersonnel = async () => {
     setLoading(true);
 
@@ -337,8 +355,9 @@ export default function PersonnelPage() {
 
       const rosterRowsResolved = await Promise.all(
         rosterRecords.map(async (entry) => {
-          const robloxName = entry.profile?.roblox_username || entry.callsign || entry.profile?.discord_username || 'Unknown';
-          if (excludedNames.has(normalizeName(robloxName)) || excludedNames.has(normalizeName(entry.profile?.callsign)) || excludedNames.has(normalizeName(entry.callsign))) {
+          const profile = resolveRosterProfile(entry.profile);
+          const robloxName = resolveRosterUsername(entry) || 'Unknown';
+          if (excludedNames.has(normalizeName(robloxName)) || excludedNames.has(normalizeName(profile?.callsign)) || excludedNames.has(normalizeName(entry.callsign))) {
             return null;
           }
           if (!isRosterEligibleRank(entry.rank)) {
@@ -459,12 +478,13 @@ export default function PersonnelPage() {
       const rosterMatch = row.profileId
         ? rosterRows.find((entry) => entry.profile_id === row.profileId)
         : null;
+      const rosterProfile = resolveRosterProfile(rosterMatch?.profile || null);
       await syncBattleLogUnitsForAliases([
         row.username,
         rosterMatch?.callsign,
-        rosterMatch?.profile?.roblox_username,
-        rosterMatch?.profile?.discord_username,
-        rosterMatch?.profile?.callsign
+        rosterProfile?.roblox_username,
+        rosterProfile?.discord_username,
+        rosterProfile?.callsign
       ], normalizedUnit);
 
       await loadPersonnel();
@@ -484,7 +504,7 @@ export default function PersonnelPage() {
       const rowsWithUsernames = rosterRows
         .map((entry) => ({
           entry,
-          username: String(entry.profile?.roblox_username || entry.callsign || '').trim()
+          username: resolveRosterUsername(entry)
         }))
         .filter((item) => item.username.length > 0);
 
