@@ -78,6 +78,7 @@ export default function BattlesPage() {
   const [logs, setLogs] = useState<BattleStatLog[]>([]);
   const [unitByName, setUnitByName] = useState<Record<string, string>>({});
   const [isStaff, setIsStaff] = useState(false);
+  const [showOlderBattles, setShowOlderBattles] = useState(false);
   const [selectedBattleId, setSelectedBattleId] = useState<string>('');
   const [expandedBattleId, setExpandedBattleId] = useState<string>('');
   const [logText, setLogText] = useState('');
@@ -179,6 +180,9 @@ export default function BattlesPage() {
 
   const selectedLogs = useMemo(() => logs.filter((entry) => entry.battle_id === selectedBattleId), [logs, selectedBattleId]);
   const selectedBattle = useMemo(() => battles.find((battle) => battle.id === selectedBattleId) || null, [battles, selectedBattleId]);
+
+  const recentBattles = useMemo(() => battles.slice(0, 4), [battles]);
+  const olderBattles = useMemo(() => battles.slice(4), [battles]);
 
   const inferUnit = (participantName: string) => {
     const normalized = participantName.replace(/[_\s]+/g, '').toLowerCase();
@@ -388,6 +392,10 @@ export default function BattlesPage() {
     }
   };
 
+  const toggleOlderBattles = () => {
+    setShowOlderBattles((current) => !current);
+  };
+
   const importLogs = async () => {
     if (!selectedBattleId || !logText.trim()) {
       return;
@@ -423,7 +431,7 @@ export default function BattlesPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {battles.map((battle) => (
+        {recentBattles.map((battle) => (
           <div key={battle.id} className={expandedBattleId === battle.id ? 'rounded border border-silver/40 p-1' : ''}>
             <BattleCard
               name={battle.name}
@@ -502,6 +510,106 @@ export default function BattlesPage() {
           </div>
         ))}
       </div>
+
+      {olderBattles.length > 0 && (
+        <div className="rounded border border-slateBlue/70 bg-[#141a24] p-4">
+          <button
+            type="button"
+            onClick={toggleOlderBattles}
+            aria-expanded={showOlderBattles}
+            aria-controls="older-battles-list"
+            className="flex w-full items-center justify-between gap-3 text-left text-xs uppercase tracking-[0.3em] text-slate-300"
+          >
+            <span>{showOlderBattles ? 'Hide past battles' : 'Show past battles'}</span>
+            <span className="rounded border border-slateBlue/60 px-2 py-1 text-[10px] tracking-[0.3em] text-slate-400">
+              {olderBattles.length}
+            </span>
+          </button>
+
+          {showOlderBattles && (
+            <div id="older-battles-list" className="mt-4 grid gap-4 lg:grid-cols-2">
+              {olderBattles.map((battle) => (
+                <div key={battle.id} className={expandedBattleId === battle.id ? 'rounded border border-silver/40 p-1' : ''}>
+                  <BattleCard
+                    name={battle.name}
+                    classification={battle.classification}
+                    commandingOfficer={battle.commanding_officer}
+                    personnelCount={personnelCountByBattle.get(battle.id) ?? battle.personnel_count}
+                    date={battle.start_date}
+                    pointsScored={battle.threat_level}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setExpandedBattleId((current) => current === battle.id ? '' : battle.id)}
+                    className="mt-2 rounded border border-slateBlue/70 px-3 py-1 text-xs uppercase tracking-[0.3em] text-slate-300"
+                  >
+                    View Logs
+                  </button>
+                  {expandedBattleId === battle.id && (
+                    <div className="mt-3 rounded border border-slateBlue/60 bg-[#0d121b] p-4">
+                      <div className="mb-3 text-[10px] uppercase tracking-[0.3em] text-slate-400">Battle Log Sheet</div>
+                      {(logsByBattle.get(battle.id) || []).length === 0 ? (
+                        <p className="text-sm text-slate-400">No logs recorded for this battle yet.</p>
+                      ) : (
+                        <div className="overflow-auto rounded border border-slateBlue/50">
+                          <table className="min-w-full text-left text-sm">
+                            <thead className="bg-slateBlue/30 text-slate-200">
+                              <tr>
+                                <th className="px-3 py-2">Name</th>
+                                <th className="px-3 py-2">K</th>
+                                <th className="px-3 py-2">D</th>
+                                <th className="px-3 py-2">A</th>
+                                <th className="px-3 py-2">Unit</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(logsByBattle.get(battle.id) || []).map((entry) => (
+                                <tr key={entry.id} className="border-t border-slateBlue/40">
+                                  <td className="px-3 py-2 font-semibold text-silver">{entry.participant_name}</td>
+                                  <td className="px-3 py-2 text-slate-300">{entry.kills}</td>
+                                  <td className="px-3 py-2 text-slate-300">{entry.deaths}</td>
+                                  <td className="px-3 py-2 text-slate-300">{entry.assists}</td>
+                                  <td className="px-3 py-2 text-slate-300">{entry.unit}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {isStaff && (
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setFormState({
+                          id: battle.id,
+                          name: battle.name,
+                          classification: battle.classification,
+                          commandingOfficer: battle.commanding_officer,
+                          date: battle.start_date,
+                          pointsScored: battle.threat_level,
+                          description: battle.description
+                        })}
+                        className="rounded border border-slateBlue/70 px-3 py-1 text-xs uppercase tracking-[0.3em] text-slate-300"
+                      >
+                        Edit Battle
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPendingBattleDeleteId(battle.id)}
+                        className="rounded border border-red-500/60 px-3 py-1 text-xs uppercase tracking-[0.3em] text-red-300"
+                      >
+                        Delete Battle
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {isStaff && (
         <div className="grid gap-4 lg:grid-cols-2">
