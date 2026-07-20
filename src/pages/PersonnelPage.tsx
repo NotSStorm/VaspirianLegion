@@ -31,11 +31,15 @@ const RANK_INDEX_BY_KEY = new Map<string, number>(
 );
 
 const RANK_ALIASES: Record<string, string> = {
+  cst: 'Conscript',
+  conscript: 'Conscript',
   ssgt: 'Staff Sergeant',
   'staff sergeant': 'Staff Sergeant',
   sgt: 'Sergeant',
   cpl: 'Corporal',
   lcpl: 'Lance Corporal',
+  'l/cpl': 'Lance Corporal',
+  'sub-lt': 'Sub-Lieutenant',
   'lt colonel': 'Lieutenant Colonel',
   'lieutenant colonel': 'Lieutenant Colonel',
   'sub lieutenant': 'Sub-Lieutenant'
@@ -139,19 +143,50 @@ export default function PersonnelPage() {
 
   const normalizeName = (value?: string | null) => normalizePersonnelName(value);
 
+  const canonicalizeGroupRank = (value?: string | null) => {
+    const raw = String(value || '').trim();
+    if (!raw) {
+      return null;
+    }
+
+    const lowered = raw.toLowerCase();
+    const aliasResolved = RANK_ALIASES[lowered] || raw;
+    const aliasKey = aliasResolved.toLowerCase();
+
+    const directIndex = RANK_INDEX_BY_KEY.get(aliasKey);
+    if (directIndex !== undefined) {
+      return ALLOWED_GROUP_RANKS[directIndex];
+    }
+
+    const normalized = lowered.replace(/[^a-z\s-]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (/\bcst\b|\bconscript\b/.test(normalized)) return 'Conscript';
+    if (/\bsoldat\b/.test(normalized)) return 'Soldat';
+    if (/\bmusketier\b/.test(normalized)) return 'Musketier';
+    if (/\bfusilier\b/.test(normalized)) return 'Fusilier';
+    if (/\blegionnaire\b/.test(normalized)) return 'Legionnaire';
+    if (/\blance corporal\b|\blcpl\b|\bl\/cpl\b/.test(normalized)) return 'Lance Corporal';
+    if (/\bcorporal\b|\bcpl\b/.test(normalized)) return 'Corporal';
+    if (/\bstaff sergeant\b|\bssgt\b/.test(normalized)) return 'Staff Sergeant';
+    if (/\bsergeant major\b/.test(normalized)) return 'Sergeant Major';
+    if (/\bsergeant\b|\bsgt\b/.test(normalized)) return 'Sergeant';
+    if (/\bensign\b/.test(normalized)) return 'Ensign';
+    if (/\bsub lieutenant\b|\bsub-lieutenant\b|\bsub-lt\b/.test(normalized)) return 'Sub-Lieutenant';
+    if (/\blieutenant colonel\b|\blt colonel\b/.test(normalized)) return 'Lieutenant Colonel';
+    if (/\blieutenant\b|\blt\b/.test(normalized)) return 'Lieutenant';
+    if (/\bcaptain\b/.test(normalized)) return 'Captain';
+    if (/\bmajor\b/.test(normalized)) return 'Major';
+    if (/\bcolonel\b/.test(normalized)) return 'Colonel';
+
+    return null;
+  };
+
   const sanitizeGroupRank = (value?: string | null) => {
     const raw = String(value || '').trim();
     if (!raw) {
       return 'Unranked';
     }
 
-    const aliasResolved = RANK_ALIASES[raw.toLowerCase()] || raw;
-    const allowedIndex = RANK_INDEX_BY_KEY.get(aliasResolved.toLowerCase());
-    if (allowedIndex === undefined) {
-      return raw;
-    }
-
-    return ALLOWED_GROUP_RANKS[allowedIndex];
+    return canonicalizeGroupRank(raw) || raw;
   };
 
   const isRosterEligibleRank = (value?: string | null) => {
@@ -160,7 +195,7 @@ export default function PersonnelPage() {
       return true;
     }
 
-    const aliasResolved = RANK_ALIASES[raw.toLowerCase()] || raw;
+    const aliasResolved = canonicalizeGroupRank(raw) || raw;
     if (HIGH_RANK_PATTERN.test(aliasResolved)) {
       return false;
     }
@@ -174,13 +209,7 @@ export default function PersonnelPage() {
       return null;
     }
 
-    const aliasResolved = RANK_ALIASES[raw.toLowerCase()] || raw;
-    const allowedIndex = RANK_INDEX_BY_KEY.get(aliasResolved.toLowerCase());
-    if (allowedIndex === undefined) {
-      return 'Unranked';
-    }
-
-    return ALLOWED_GROUP_RANKS[allowedIndex];
+    return canonicalizeGroupRank(raw) || raw;
   };
 
   const shouldSkipUnrankedOverwrite = (existingRank?: string | null, incomingRank?: string | null) => {
@@ -195,8 +224,17 @@ export default function PersonnelPage() {
 
   const getRankSortWeight = (rank?: string | null) => {
     const normalized = String(rank || '').trim().toLowerCase();
+    if (!normalized || normalized === 'unranked') {
+      return -1;
+    }
+
+    const canonical = canonicalizeGroupRank(rank);
+    if (canonical) {
+      return RANK_INDEX_BY_KEY.get(canonical.toLowerCase()) ?? 0;
+    }
+
     const rankIndex = RANK_INDEX_BY_KEY.get(normalized);
-    return rankIndex === undefined ? Number.MAX_SAFE_INTEGER : rankIndex;
+    return rankIndex === undefined ? 0 : rankIndex;
   };
 
   const collectAliases = (values: Array<string | null | undefined>) => values

@@ -149,11 +149,11 @@ async function verifyRobloxGroupRole(username: string, groupUrl: string, env: an
     const userId = usernameCheck.robloxId;
 
     const rolesResponse = await fetchWithRetry(
-      `https://groups.roblox.com/v1/users/${encodeURIComponent(String(userId))}/groups/roles`,
+      `https://users.roblox.com/v1/users/${encodeURIComponent(String(userId))}/groups/roles`,
       { method: 'GET' },
-      1,
-      250,
-      5000,
+      2,
+      300,
+      7000,
       'verify-group-role'
     );
     if (!rolesResponse.ok) {
@@ -232,7 +232,7 @@ async function fetchRobloxAvatarImageUrl(input: { robloxId?: string | number | n
 }
 
 const BULK_USERNAME_BATCH_SIZE = 100;
-const BULK_ROLE_CONCURRENCY = 4;
+const BULK_ROLE_CONCURRENCY = 2;
 
 function chunk<T>(items: T[], size: number) {
   if (size <= 0) {
@@ -428,6 +428,19 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
   const entries = Array.from(userIdByUsername.entries());
   const rankByUsername: Record<string, string> = {};
   const roleLookupFailures: string[] = [];
+  const lookupDiagnostics: Record<string, { resolvedUserId: boolean; groupRolesCallSucceeded: boolean; matchingGroupFound: boolean; resolvedRoleName: string | null; error: string | null }> = {};
+
+  unresolvedUsernames.forEach((username) => {
+    const key = username.toLowerCase();
+    lookupDiagnostics[key] = {
+      resolvedUserId: false,
+      groupRolesCallSucceeded: false,
+      matchingGroupFound: false,
+      resolvedRoleName: null,
+      error: 'username_unresolved'
+    };
+    console.warn(`[bulk-group-ranks] ${username}: username to userId resolution failed`);
+  });
 
   for (let index = 0; index < entries.length; index += BULK_ROLE_CONCURRENCY) {
     const segment = entries.slice(index, index + BULK_ROLE_CONCURRENCY);
@@ -435,19 +448,19 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
       let response: Response;
       try {
         response = await fetchWithRetry(
-          `https://groups.roblox.com/v1/users/${encodeURIComponent(userId)}/groups/roles`,
+          `https://users.roblox.com/v1/users/${encodeURIComponent(userId)}/groups/roles`,
           { method: 'GET' },
-          1,
-          250,
-          4500,
+          2,
+          300,
+          7000,
           'bulk-group-roles'
         );
       } catch {
-        return { usernameKey, ok: false, roleName: null as string | null };
+        return { usernameKey, ok: false, roleName: null as string | null, failureReason: 'group_roles_request_failed' };
       }
 
       if (!response.ok) {
-        return { usernameKey, ok: false, roleName: null as string | null };
+        return { usernameKey, ok: false, roleName: null as string | null, failureReason: `group_roles_http_${response.status}` };
       }
 
       const payload = await response.json().catch(() => ({}));
@@ -459,27 +472,46 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
         return {
           usernameKey,
           ok: false,
-          roleName: null as string | null
+          roleName: null as string | null,
+          failureReason: 'group_not_found_for_user'
         };
       }
 
       return {
         usernameKey,
         ok: true,
-        roleName: String(groupRole.role.name)
+        roleName: String(groupRole.role.name),
+        failureReason: null
       };
     }));
 
     segmentResults.forEach((result) => {
       if (!result.ok || !result.roleName) {
         roleLookupFailures.push(result.usernameKey);
+        lookupDiagnostics[result.usernameKey] = {
+          resolvedUserId: true,
+          groupRolesCallSucceeded: result.failureReason !== 'group_roles_request_failed',
+          matchingGroupFound: false,
+          resolvedRoleName: null,
+          error: result.failureReason || 'unknown_failure'
+        };
+        console.warn(`[bulk-group-ranks] ${result.usernameKey}: failed (${result.failureReason || 'unknown_failure'})`);
         return;
       }
+
       rankByUsername[result.usernameKey] = result.roleName;
+      lookupDiagnostics[result.usernameKey] = {
+        resolvedUserId: true,
+        groupRolesCallSucceeded: true,
+        matchingGroupFound: true,
+        resolvedRoleName: result.roleName,
+        error: null
+      };
+      console.log(`[bulk-group-ranks] ${result.usernameKey}: matched role "${result.roleName}"`);
     });
 
     if (index + BULK_ROLE_CONCURRENCY < entries.length) {
-      await sleep(80);
+      await sleep(220);
     }
   }
 
@@ -487,7 +519,8 @@ async function fetchBulkGroupRanks(usernames: string[], groupId: string) {
     rankByUsername,
     unresolvedUsernames,
     roleLookupFailures,
-    usernamesResolved: entries.length
+    usernamesResolved: entries.length,
+    lookupDiagnostics
   };
 }
 
@@ -514,11 +547,11 @@ export default {
         }
 
         const response = await fetchWithRetry(
-          `https://groups.roblox.com/v1/users/${encodeURIComponent(resolvedUserId)}/groups/roles`,
+          `https://users.roblox.com/v1/users/${encodeURIComponent(resolvedUserId)}/groups/roles`,
           { method: 'GET' },
-          1,
-          250,
-          5000,
+          2,
+          300,
+          7000,
           'user-rank'
         );
 
@@ -645,6 +678,7 @@ export default {
           usernamesResolved: result.usernamesResolved,
           unresolvedUsernames: result.unresolvedUsernames,
           roleLookupFailures: result.roleLookupFailures,
+          lookupDiagnostics: result.lookupDiagnostics,
           rankByUsername: result.rankByUsername,
           synced: result.usernamesResolved,
           failed,
