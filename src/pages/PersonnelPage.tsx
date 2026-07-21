@@ -855,6 +855,8 @@ export default function PersonnelPage() {
         )}
       </div>
 
+      {isStaff && <PersonnelManagementPanel onChanged={() => loadPersonnel()} />}
+
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
         <div className="mb-4 text-[10px] uppercase tracking-[0.35em] text-slate-400">Command</div>
         {loading ? <p className="text-sm text-slate-400">Loading accepted personnel...</p> : (
@@ -867,8 +869,6 @@ export default function PersonnelPage() {
           />
         )}
       </div>
-
-      {isStaff && <PersonnelManagementPanel onChanged={() => loadPersonnel()} />}
     </section>
   );
 }
