@@ -27,6 +27,14 @@ type TrendPoint = {
 
 type RallyView = 'total' | 'company';
 
+type HoverPoint = {
+  x: number;
+  y: number;
+  date: string;
+  label: string;
+  value: number;
+};
+
 function unitBucket(unit: string) {
   const lowered = unit.toLowerCase();
   if (lowered.includes('melrose') || lowered.includes('87th')) return 'melrose';
@@ -38,6 +46,7 @@ export default function RallyTrackerPage() {
   const [period, setPeriod] = useState<TimeWindow>('weekly');
   const [view, setView] = useState<RallyView>('total');
   const [points, setPoints] = useState<TrendPoint[]>([]);
+  const [hoverPoint, setHoverPoint] = useState<HoverPoint | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -283,7 +292,21 @@ export default function RallyTrackerPage() {
               </button>
             </div>
 
-            <div className="w-full pb-2">
+            <div className="relative w-full pb-2">
+              {hoverPoint && (
+                <div
+                  className="pointer-events-none absolute z-10 rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-xs text-slate-200 shadow-lg"
+                  style={{
+                    left: `${(hoverPoint.x / chartArea.width) * 100}%`,
+                    top: `${(hoverPoint.y / chartArea.height) * 100}%`,
+                    transform: 'translate(-50%, calc(-100% - 12px))'
+                  }}
+                >
+                  <div className="font-semibold text-silver">{hoverPoint.label}</div>
+                  <div className="mt-1">Date: {hoverPoint.date}</div>
+                  <div>Value: {hoverPoint.value}</div>
+                </div>
+              )}
               <svg
                 viewBox={`0 0 ${chartArea.width} ${chartArea.height}`}
                 preserveAspectRatio="xMidYMid meet"
@@ -325,7 +348,14 @@ export default function RallyTrackerPage() {
                       <g key={`total-${index}`}>
                         <circle cx={point.x} cy={point.y} r="4.8" fill="#3559a8" />
                         <text x={point.x} y={point.y - 10} textAnchor="middle" fill="#496cb8" fontSize="10" fontWeight="700">{point.value}</text>
-                        <circle cx={point.x} cy={point.y} r="8" fill="transparent">
+                        <circle
+                          cx={point.x}
+                          cy={point.y}
+                          r="12"
+                          fill="transparent"
+                          onMouseEnter={() => setHoverPoint({ x: point.x, y: point.y, date: point.date, label: 'Total', value: point.value })}
+                          onMouseLeave={() => setHoverPoint(null)}
+                        >
                           <title>{`${point.date} | Total: ${point.value}`}</title>
                         </circle>
                       </g>
@@ -347,7 +377,14 @@ export default function RallyTrackerPage() {
                       <g key={`pirkland-${index}`}>
                         <circle cx={point.x} cy={point.y} r="4.3" fill="#5d84d8" />
                         <text x={point.x} y={point.y - 10} textAnchor="middle" fill="#5d84d8" fontSize="10" fontWeight="700">{point.value}</text>
-                        <circle cx={point.x} cy={point.y} r="8" fill="transparent">
+                        <circle
+                          cx={point.x}
+                          cy={point.y}
+                          r="12"
+                          fill="transparent"
+                          onMouseEnter={() => setHoverPoint({ x: point.x, y: point.y, date: point.date, label: 'Pirkland', value: point.value })}
+                          onMouseLeave={() => setHoverPoint(null)}
+                        >
                           <title>{`${point.date} | Pirkland: ${point.value}`}</title>
                         </circle>
                       </g>
@@ -357,7 +394,14 @@ export default function RallyTrackerPage() {
                       <g key={`melrose-${index}`}>
                         <circle cx={point.x} cy={point.y} r="4.3" fill="#8f4de8" />
                         <text x={point.x} y={point.y - 10} textAnchor="middle" fill="#8f4de8" fontSize="10" fontWeight="700">{point.value}</text>
-                        <circle cx={point.x} cy={point.y} r="8" fill="transparent">
+                        <circle
+                          cx={point.x}
+                          cy={point.y}
+                          r="12"
+                          fill="transparent"
+                          onMouseEnter={() => setHoverPoint({ x: point.x, y: point.y, date: point.date, label: 'Melrose', value: point.value })}
+                          onMouseLeave={() => setHoverPoint(null)}
+                        >
                           <title>{`${point.date} | Melrose: ${point.value}`}</title>
                         </circle>
                       </g>
