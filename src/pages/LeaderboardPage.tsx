@@ -37,6 +37,7 @@ type HighScoreEntry = {
 
 type Metric = 'kills' | 'deaths' | 'assists' | 'events' | 'high-scores';
 type CumulativeMetric = Exclude<Metric, 'high-scores'>;
+type HighScoreMetric = 'kills' | 'deaths' | 'assists';
 
 const metricLabels: Record<Metric, string> = {
   kills: 'Kills',
@@ -174,11 +175,7 @@ export default function LeaderboardPage() {
     'all-time': aggregateByWindow('all-time')
   }), [logs, battleDates]);
 
-  const highScoresByWindow = useMemo(() => ({
-    weekly: aggregateHighScoresByWindow('weekly'),
-    monthly: aggregateHighScoresByWindow('monthly'),
-    'all-time': aggregateHighScoresByWindow('all-time')
-  }), [logs, battleDates]);
+  const highScores = useMemo(() => aggregateHighScoresByWindow('all-time'), [logs, battleDates]);
 
   const rankBoard = (entries: LeaderEntry[], metric: CumulativeMetric) => (
     [...entries]
@@ -186,9 +183,14 @@ export default function LeaderboardPage() {
       .slice(0, 10)
   );
 
-  const rankHighScoreBoard = (entries: HighScoreEntry[]) => (
+  const rankHighScoreBoard = (entries: HighScoreEntry[], selectedMetric: HighScoreMetric) => (
     [...entries]
       .sort((a, b) => {
+        const selectedDelta = b[selectedMetric] - a[selectedMetric];
+        if (selectedDelta !== 0) {
+          return selectedDelta;
+        }
+
         const killDelta = b.kills - a.kills;
         if (killDelta !== 0) {
           return killDelta;
@@ -238,42 +240,6 @@ export default function LeaderboardPage() {
   };
 
   const renderWindowColumn = (window: TimeWindow) => {
-    if (metric === 'high-scores') {
-      const ranked = rankHighScoreBoard(highScoresByWindow[window]);
-
-      return (
-        <div key={window} className="rounded border border-slateBlue/70 bg-[#141a24] p-4">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.3em] text-silver">{windowLabel[window]}</h3>
-          <div className="mt-3 space-y-2">
-            {ranked.length === 0 ? (
-              <p className="text-sm text-slate-400">No data logged yet.</p>
-            ) : (
-              <>
-                <div className="grid grid-cols-[minmax(0,1fr)_70px_70px_70px] gap-2 px-3 text-[10px] uppercase tracking-[0.2em] text-slate-400">
-                  <div>Participant</div>
-                  <div className="text-right">Kills</div>
-                  <div className="text-right">Deaths</div>
-                  <div className="text-right">Assists</div>
-                </div>
-                {ranked.map((entry, index) => (
-                  <div key={`${entry.name}-${entry.unit}-${index}`} className="grid grid-cols-[minmax(0,1fr)_70px_70px_70px] items-center gap-2 rounded border border-slateBlue/50 bg-[#0d121b] px-3 py-2">
-                    <div className="truncate text-xs text-slate-300">
-                      <span className="text-slate-400">#{index + 1}</span>
-                      <span className="ml-2 font-semibold text-silver">{entry.name}</span>
-                      <span className="ml-1 text-slate-500">({entry.unit || 'Unassigned'})</span>
-                    </div>
-                    <div className="text-right font-mono text-xs text-slate-200">{entry.kills}</div>
-                    <div className="text-right font-mono text-xs text-slate-200">{entry.deaths}</div>
-                    <div className="text-right font-mono text-xs text-slate-200">{entry.assists}</div>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        </div>
-      );
-    }
-
     const selectedMetric = metric as CumulativeMetric;
     const ranked = rankBoard(boardByWindow[window], selectedMetric);
 
@@ -284,6 +250,38 @@ export default function LeaderboardPage() {
           {ranked.length === 0 ? (
             <p className="text-sm text-slate-400">No data logged yet.</p>
           ) : ranked.map((entry, index) => renderRow(entry, index, selectedMetric))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderHighScoreColumn = (selectedMetric: HighScoreMetric) => {
+    const ranked = rankHighScoreBoard(highScores, selectedMetric);
+
+    return (
+      <div key={selectedMetric} className="rounded border border-slateBlue/70 bg-[#141a24] p-4">
+        <h3 className="text-sm font-semibold uppercase tracking-[0.3em] text-silver">{metricLabels[selectedMetric]}</h3>
+        <div className="mt-3 space-y-2">
+          {ranked.length === 0 ? (
+            <p className="text-sm text-slate-400">No data logged yet.</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-[minmax(0,1fr)_84px] gap-2 px-3 text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                <div>Participant</div>
+                <div className="text-right">{metricLabels[selectedMetric]}</div>
+              </div>
+              {ranked.map((entry, index) => (
+                <div key={`${selectedMetric}-${entry.name}-${entry.unit}-${index}`} className="grid grid-cols-[minmax(0,1fr)_84px] items-center gap-2 rounded border border-slateBlue/50 bg-[#0d121b] px-3 py-2">
+                  <div className="truncate text-xs text-slate-300">
+                    <span className="text-slate-400">#{index + 1}</span>
+                    <span className="ml-2 font-semibold text-silver">{entry.name}</span>
+                    <span className="ml-1 text-slate-500">({entry.unit || 'Unassigned'})</span>
+                  </div>
+                  <div className="text-right font-mono text-xs text-slate-200">{entry[selectedMetric]}</div>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       </div>
     );
@@ -308,7 +306,9 @@ export default function LeaderboardPage() {
         </div>
       </div>
       <div className="grid gap-4 lg:grid-cols-3">
-        {windowOrder.map((window) => renderWindowColumn(window))}
+        {metric === 'high-scores'
+          ? (['kills', 'deaths', 'assists'] as HighScoreMetric[]).map((selectedMetric) => renderHighScoreColumn(selectedMetric))
+          : windowOrder.map((window) => renderWindowColumn(window))}
       </div>
     </section>
   );
