@@ -47,6 +47,10 @@ const RANK_ALIASES: Record<string, string> = {
 
 const HIGH_RANK_PATTERN = /\bgeneral\b|brigadier|field marshal|marshal|admiral/i;
 
+function isNonFatalPersonnelDirectoryError(message: string) {
+  return /does not exist|relation|permission|not authorized|jwt|rls|row-level/i.test(message);
+}
+
 type BulkSyncResponse = {
   status?: 'in_progress' | 'complete';
   jobId?: string | null;
@@ -300,7 +304,7 @@ export default function PersonnelPage() {
       ]);
 
       const personnelError = personnelResponse.error;
-      if (personnelError && !/does not exist|relation/i.test(personnelError.message)) {
+      if (personnelError && !isNonFatalPersonnelDirectoryError(personnelError.message)) {
         throw personnelError;
       }
 
