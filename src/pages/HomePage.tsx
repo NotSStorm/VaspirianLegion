@@ -52,40 +52,58 @@ export default function HomePage() {
   const [battlesCompleted, setBattlesCompleted] = useState(0);
   const [upcomingEngagements, setUpcomingEngagements] = useState(0);
   const [upcomingBattles, setUpcomingBattles] = useState<ScheduleEventLite[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
-      const [{ count: rosterCount }, { data: battleData }, { data: scheduleData }] = await Promise.all([
-        supabase.from('roster').select('*', { count: 'exact', head: true }),
-        supabase.from('battles').select('id, status, start_date'),
-        supabase.from('schedule_events').select('id, name, theater, start_date').order('start_date', { ascending: true })
-      ]);
+      setError(null);
+      try {
+        const [
+          { count: rosterCount, error: rosterError },
+          { data: battleData, error: battleError },
+          { data: scheduleData, error: scheduleError }
+        ] = await Promise.all([
+          supabase.from('roster').select('*', { count: 'exact', head: true }),
+          supabase.from('battles').select('id, status, start_date'),
+          supabase.from('schedule_events').select('id, name, theater, start_date').order('start_date', { ascending: true })
+        ]);
 
-      const battles = (battleData || []) as BattleLite[];
-      const now = new Date();
-      const completed = battles.length;
-      const upcoming = battles.filter((battle) => {
-        const status = String(battle.status || '');
-        if (/upcoming|pending|planned|scheduled/i.test(status)) return true;
-        const parsed = new Date(battle.start_date);
-        return !Number.isNaN(parsed.getTime()) && parsed > now;
-      }).length;
+        if (rosterError) throw rosterError;
+        if (battleError) throw battleError;
+        if (scheduleError) throw scheduleError;
 
-      const scheduledBattles = ((scheduleData || []) as ScheduleEventLite[])
-        .filter((entry) => {
-          const parsed = parseDate(entry.start_date);
-          return parsed ? parsed > now : false;
-        })
-        .sort((a, b) => {
-          const left = parseDate(a.start_date)?.getTime() || Number.MAX_SAFE_INTEGER;
-          const right = parseDate(b.start_date)?.getTime() || Number.MAX_SAFE_INTEGER;
-          return left - right;
-        });
+        const battles = (battleData || []) as BattleLite[];
+        const now = new Date();
+        const completed = battles.length;
+        const upcoming = battles.filter((battle) => {
+          const status = String(battle.status || '');
+          if (/upcoming|pending|planned|scheduled/i.test(status)) return true;
+          const parsed = new Date(battle.start_date);
+          return !Number.isNaN(parsed.getTime()) && parsed > now;
+        }).length;
 
-      setActivePersonnel(rosterCount || 0);
-      setBattlesCompleted(completed);
-      setUpcomingEngagements(scheduledBattles.length || upcoming);
-      setUpcomingBattles(scheduledBattles.slice(0, 5));
+        const scheduledBattles = ((scheduleData || []) as ScheduleEventLite[])
+          .filter((entry) => {
+            const parsed = parseDate(entry.start_date);
+            return parsed ? parsed > now : false;
+          })
+          .sort((a, b) => {
+            const left = parseDate(a.start_date)?.getTime() || Number.MAX_SAFE_INTEGER;
+            const right = parseDate(b.start_date)?.getTime() || Number.MAX_SAFE_INTEGER;
+            return left - right;
+          });
+
+        setActivePersonnel(rosterCount || 0);
+        setBattlesCompleted(completed);
+        setUpcomingEngagements(scheduledBattles.length || upcoming);
+        setUpcomingBattles(scheduledBattles.slice(0, 5));
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load public battle data.');
+        setActivePersonnel(0);
+        setBattlesCompleted(0);
+        setUpcomingEngagements(0);
+        setUpcomingBattles([]);
+      }
     };
 
     void load();
@@ -158,6 +176,7 @@ export default function HomePage() {
           <ArrowRight className="h-4 w-4" />
           Upcoming Battles
         </div>
+        {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
         {upcomingBattles.length === 0 ? (
           <p className="mt-3 text-slate-300">No battles currently scheduled.</p>
         ) : (

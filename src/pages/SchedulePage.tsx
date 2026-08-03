@@ -53,6 +53,7 @@ function formatEventTime(value: string) {
 export default function SchedulePage() {
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [isStaff, setIsStaff] = useState(false);
+  const [hasSession, setHasSession] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -68,8 +69,9 @@ export default function SchedulePage() {
   const loadSchedule = async () => {
     setError(null);
     try {
-      const { profile } = await getAuthenticatedState();
+      const { profile, session } = await getAuthenticatedState();
       setIsStaff(profile?.role === 'admin' || profile?.role === 'officer');
+      setHasSession(Boolean(session?.user));
 
       const { data, error: loadError } = await supabase
         .from('schedule_events')
@@ -86,6 +88,7 @@ export default function SchedulePage() {
     } catch (loadErr) {
       setError(loadErr instanceof Error ? loadErr.message : 'Unable to load schedule.');
       setEvents([]);
+      setHasSession(false);
     }
   };
 
@@ -183,6 +186,13 @@ export default function SchedulePage() {
           );
         })}
       </div>
+
+      {events.length === 0 && !error && (
+        <div className="rounded border border-slateBlue/70 bg-[#141a24] p-5 text-sm text-slate-300">
+          No upcoming operations are currently scheduled.
+          {!hasSession ? ' Public schedule entries will appear here automatically.' : ''}
+        </div>
+      )}
 
       {isStaff && (
         <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">

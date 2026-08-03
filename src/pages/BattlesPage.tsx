@@ -78,6 +78,7 @@ export default function BattlesPage() {
   const [logs, setLogs] = useState<BattleStatLog[]>([]);
   const [unitByName, setUnitByName] = useState<Record<string, string>>({});
   const [isStaff, setIsStaff] = useState(false);
+  const [hasSession, setHasSession] = useState(false);
   const [showOlderBattles, setShowOlderBattles] = useState(false);
   const [selectedBattleId, setSelectedBattleId] = useState<string>('');
   const [expandedBattleId, setExpandedBattleId] = useState<string>('');
@@ -112,6 +113,7 @@ export default function BattlesPage() {
     try {
       const { profile, session } = await getAuthenticatedState();
       setIsStaff(profile?.role === 'admin' || profile?.role === 'officer');
+      setHasSession(Boolean(session?.user));
 
       const [{ data: battleData, error: battleError }, { data: logData, error: logError }, { data: rosterData, error: rosterError }] = await Promise.all([
         supabase.from('battles').select('*').order('start_date', { ascending: false }),
@@ -150,6 +152,7 @@ export default function BattlesPage() {
       setError(loadError instanceof Error ? loadError.message : 'Unable to load battles.');
       setBattles([]);
       setLogs([]);
+      setHasSession(false);
     }
   };
 
@@ -530,6 +533,13 @@ export default function BattlesPage() {
           </div>
         ))}
       </div>
+
+      {visibleBattles.length === 0 && !error && (
+        <div className="rounded border border-slateBlue/70 bg-[#141a24] p-5 text-sm text-slate-300">
+          No battles have been logged yet.
+          {!hasSession ? ' Public battle records will appear here, and staff can add entries after logging in.' : ' Staff can add entries using the battle editor.'}
+        </div>
+      )}
 
       {hasOlderBattles && (
         <div className="rounded border border-slateBlue/70 bg-[#141a24] p-4">
