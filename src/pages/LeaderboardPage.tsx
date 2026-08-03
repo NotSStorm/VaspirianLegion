@@ -28,6 +28,7 @@ type LeaderEntry = {
 };
 
 type HighScoreEntry = {
+  id: string;
   name: string;
   unit: string;
   kills: number;
@@ -119,6 +120,7 @@ export default function LeaderboardPage() {
 
       const key = `${log.participant_name}::${log.unit}`;
       const existing = map.get(key) || {
+        id: log.id,
         name: log.participant_name,
         unit: log.unit,
         kills: 0,
@@ -141,50 +143,28 @@ export default function LeaderboardPage() {
     }));
   };
 
-  const aggregateHighScoresByWindow = (selectedWindow: TimeWindow) => {
-    const now = new Date();
-    const map = new Map<string, HighScoreEntry>();
-
-    logs.forEach((log) => {
-      const date = resolveLogDate(log);
-      if (!date || !isInTimeWindow(date, selectedWindow, now)) {
-        return;
-      }
-
-      const key = `${log.participant_name}::${log.unit}`;
-      const existing = map.get(key) || {
-        name: log.participant_name,
-        unit: log.unit,
-        kills: 0,
-        deaths: 0,
-        assists: 0
-      };
-
-      existing.kills = Math.max(existing.kills, Number(log.kills) || 0);
-      existing.deaths = Math.max(existing.deaths, Number(log.deaths) || 0);
-      existing.assists = Math.max(existing.assists, Number(log.assists) || 0);
-      map.set(key, existing);
-    });
-
-    return Array.from(map.values());
-  };
-
   const boardByWindow = useMemo(() => ({
     weekly: aggregateByWindow('weekly'),
     monthly: aggregateByWindow('monthly'),
     'all-time': aggregateByWindow('all-time')
   }), [logs, battleDates]);
 
-  const highScores = useMemo(() => aggregateHighScoresByWindow('all-time'), [logs, battleDates]);
-
   const rankBoard = (entries: LeaderEntry[], metric: CumulativeMetric) => (
     [...entries]
       .sort((a, b) => (Number(b[metric]) || 0) - (Number(a[metric]) || 0))
-      .slice(0, 10)
+      .slice(0, 25)
   );
 
   const rankHighScoreBoard = (entries: HighScoreEntry[], selectedMetric: HighScoreMetric) => (
-    [...entries]
+    entries
+      .map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        unit: entry.unit,
+        kills: entry.kills,
+        deaths: entry.deaths,
+        assists: entry.assists
+      }))
       .sort((a, b) => {
         const selectedDelta = b[selectedMetric] - a[selectedMetric];
         if (selectedDelta !== 0) {
@@ -203,7 +183,7 @@ export default function LeaderboardPage() {
 
         return b.deaths - a.deaths;
       })
-      .slice(0, 10)
+      .slice(0, 25)
   );
 
   const windowLabel: Record<TimeWindow, string> = {
@@ -256,7 +236,17 @@ export default function LeaderboardPage() {
   };
 
   const renderHighScoreColumn = (selectedMetric: HighScoreMetric) => {
-    const ranked = rankHighScoreBoard(highScores, selectedMetric);
+    const ranked = rankHighScoreBoard(
+      logs.map((log) => ({
+        id: log.id,
+        name: log.participant_name,
+        unit: log.unit,
+        kills: Number(log.kills) || 0,
+        deaths: Number(log.deaths) || 0,
+        assists: Number(log.assists) || 0
+      })),
+      selectedMetric
+    );
 
     return (
       <div key={selectedMetric} className="rounded border border-slateBlue/70 bg-[#141a24] p-4">
@@ -271,7 +261,7 @@ export default function LeaderboardPage() {
                 <div className="text-right">{metricLabels[selectedMetric]}</div>
               </div>
               {ranked.map((entry, index) => (
-                <div key={`${selectedMetric}-${entry.name}-${entry.unit}-${index}`} className="grid grid-cols-[minmax(0,1fr)_84px] items-center gap-2 rounded border border-slateBlue/50 bg-[#0d121b] px-3 py-2">
+                <div key={`${selectedMetric}-${entry.id}-${index}`} className="grid grid-cols-[minmax(0,1fr)_84px] items-center gap-2 rounded border border-slateBlue/50 bg-[#0d121b] px-3 py-2">
                   <div className="truncate text-xs text-slate-300">
                     <span className="text-slate-400">#{index + 1}</span>
                     <span className="ml-2 font-semibold text-silver">{entry.name}</span>
