@@ -234,9 +234,20 @@ export default function RallyTrackerPage() {
   const pirklandSeries = seriesPoints((point) => point.pirkland);
   const melroseSeries = seriesPoints((point) => point.melrose);
 
-  const chartWidthPx = Math.max(960, parsedPoints.length * 64);
-
   const formatTickDate = (date: Date) => `${date.getUTCMonth() + 1}/${date.getUTCDate()}/${date.getUTCFullYear()}`;
+  const visibleMonthlyTicks = useMemo(() => {
+    if (monthlyTicks.length <= 6) {
+      return monthlyTicks;
+    }
+
+    const step = Math.ceil(monthlyTicks.length / 6);
+    return monthlyTicks.filter((_, index) => index % step === 0 || index === monthlyTicks.length - 1);
+  }, [monthlyTicks]);
+
+  const totalTableRows = parsedPoints.map((point) => ({
+    date: point.date,
+    total: point.total
+  }));
 
   return (
     <section className="space-y-6">
@@ -272,11 +283,11 @@ export default function RallyTrackerPage() {
               </button>
             </div>
 
-            <div className="overflow-x-auto pb-2">
+            <div className="w-full pb-2">
               <svg
                 viewBox={`0 0 ${chartArea.width} ${chartArea.height}`}
-                className="h-[34rem] max-w-none rounded border border-[#8da1c7]/70 bg-[#b8c8df]"
-                style={{ width: `${chartWidthPx}px` }}
+                preserveAspectRatio="xMidYMid meet"
+                className="block aspect-[12/5] w-full rounded border border-[#8da1c7]/70 bg-[#b8c8df]"
               >
                 <text x={24} y={30} fill="#6b7280" fontSize="18" fontWeight="700">Grand Battery Rallies</text>
 
@@ -290,7 +301,7 @@ export default function RallyTrackerPage() {
                   );
                 })}
 
-                {monthlyTicks.map((tick) => {
+                {visibleMonthlyTicks.map((tick) => {
                   const x = xForDate(tick);
                   return (
                     <g key={`x-${tick.toISOString()}`}>
@@ -354,6 +365,30 @@ export default function RallyTrackerPage() {
                   </g>
                 )}
               </svg>
+            </div>
+
+            <div className="mt-4 rounded border border-slateBlue/60 bg-[#0d121b]">
+              <div className="border-b border-slateBlue/40 px-4 py-3 text-[10px] uppercase tracking-[0.3em] text-slate-400">
+                Rally Data
+              </div>
+              <div className="max-h-80 overflow-y-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="sticky top-0 bg-[#141a24] text-slate-200">
+                    <tr>
+                      <th className="px-4 py-3">Date</th>
+                      <th className="px-4 py-3 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {totalTableRows.map((row) => (
+                      <tr key={row.date} className="border-t border-slateBlue/30">
+                        <td className="px-4 py-3 text-slate-300">{row.date}</td>
+                        <td className="px-4 py-3 text-right font-mono text-silver">{row.total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </>
         )}
