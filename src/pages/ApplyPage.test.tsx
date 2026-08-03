@@ -48,6 +48,7 @@ describe('ApplyPage', () => {
     render(<ApplyPage />);
 
     fireEvent.change(screen.getByLabelText(/timezone/i), { target: { value: 'CST' } });
+    fireEvent.change(screen.getByLabelText(/preferred company/i), { target: { value: '82nd Pirkland' } });
     fireEvent.click(screen.getByRole('button', { name: /submit application/i }));
 
     await waitFor(() => expect(insertApplication).toHaveBeenCalled());

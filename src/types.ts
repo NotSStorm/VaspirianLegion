@@ -69,6 +69,7 @@ export interface Application {
   profile_id: string;
   callsign: string;
   timezone: string;
+  requested_company?: string | null;
   requested_group_join: boolean;
   status: string;
   reviewed_by?: string | null;

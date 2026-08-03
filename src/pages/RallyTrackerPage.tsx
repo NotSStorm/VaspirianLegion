@@ -25,6 +25,8 @@ type TrendPoint = {
   total: number;
 };
 
+type RallyView = 'total' | 'company';
+
 function unitBucket(unit: string) {
   const lowered = unit.toLowerCase();
   if (lowered.includes('melrose') || lowered.includes('87th')) return 'melrose';
@@ -34,6 +36,7 @@ function unitBucket(unit: string) {
 
 export default function RallyTrackerPage() {
   const [period, setPeriod] = useState<TimeWindow>('weekly');
+  const [view, setView] = useState<RallyView>('total');
   const [points, setPoints] = useState<TrendPoint[]>([]);
 
   useEffect(() => {
@@ -118,37 +121,129 @@ export default function RallyTrackerPage() {
     };
   }, [period]);
 
-  const maxY = useMemo(() => {
-    const top = points.reduce((max, point) => Math.max(max, point.total, point.melrose, point.pirkland), 0);
-    return top > 0 ? top : 1;
-  }, [points]);
+  const parsedPoints = useMemo(
+    () => points.map((point) => ({ ...point, parsedDate: new Date(`${point.date}T00:00:00Z`) })),
+    [points]
+  );
 
-  const toPolyline = (selector: (point: TrendPoint) => number) => {
-    if (points.length === 0) return '';
-    return points
-      .map((point, index) => {
-        const x = points.length === 1 ? 50 : 8 + (index / Math.max(points.length - 1, 1)) * 84;
-        const y = 90 - (selector(point) / maxY) * 72;
-        return `${x},${y}`;
-      })
-      .join(' ');
+  const yMax = useMemo(() => {
+    const top = parsedPoints.reduce((max, point) => {
+      if (view === 'total') {
+        return Math.max(max, point.total);
+      }
+      return Math.max(max, point.melrose, point.pirkland);
+    }, 0);
+
+    if (top <= 5) {
+      return 5;
+    }
+
+    return Math.ceil(top / 5) * 5;
+  }, [parsedPoints, view]);
+
+  const chartArea = {
+    width: 1200,
+    height: 500,
+    marginTop: 72,
+    marginRight: 28,
+    marginBottom: 56,
+    marginLeft: 60
   };
 
-  const pointCoordinates = (selector: (point: TrendPoint) => number) => points.map((point, index) => ({
-    x: points.length === 1 ? 50 : 8 + (index / Math.max(points.length - 1, 1)) * 84,
-    y: 90 - (selector(point) / maxY) * 72,
-    value: selector(point)
+  const plotWidth = chartArea.width - chartArea.marginLeft - chartArea.marginRight;
+  const plotHeight = chartArea.height - chartArea.marginTop - chartArea.marginBottom;
+
+  const firstDate = parsedPoints[0]?.parsedDate || null;
+  const lastDate = parsedPoints[parsedPoints.length - 1]?.parsedDate || null;
+
+  const xForDate = (date: Date) => {
+    if (!firstDate || !lastDate) {
+      return chartArea.marginLeft;
+    }
+
+    const span = Math.max(lastDate.getTime() - firstDate.getTime(), 1);
+    const t = (date.getTime() - firstDate.getTime()) / span;
+    return chartArea.marginLeft + t * plotWidth;
+  };
+
+  const yForValue = (value: number) => {
+    const clamped = Math.max(0, Math.min(yMax, value));
+    return chartArea.marginTop + (1 - clamped / Math.max(yMax, 1)) * plotHeight;
+  };
+
+  const monthlyTicks = useMemo(() => {
+    if (!firstDate || !lastDate) {
+      return [] as Date[];
+    }
+
+    const ticks: Date[] = [];
+    const cursor = new Date(Date.UTC(firstDate.getUTCFullYear(), firstDate.getUTCMonth(), 1));
+    const end = new Date(Date.UTC(lastDate.getUTCFullYear(), lastDate.getUTCMonth(), 1));
+
+    while (cursor.getTime() <= end.getTime()) {
+      ticks.push(new Date(cursor));
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    }
+
+    return ticks;
+  }, [firstDate, lastDate]);
+
+  const yTicks = useMemo(() => {
+    const tickCount = yMax <= 10 ? 5 : 6;
+    const step = Math.max(1, Math.round(yMax / tickCount));
+    const ticks: number[] = [];
+    for (let value = 0; value <= yMax; value += step) {
+      ticks.push(value);
+    }
+    if (ticks[ticks.length - 1] !== yMax) {
+      ticks.push(yMax);
+    }
+    return ticks;
+  }, [yMax]);
+
+  const seriesPoints = (selector: (point: TrendPoint) => number) => parsedPoints.map((point) => ({
+    x: xForDate(point.parsedDate),
+    y: yForValue(selector(point)),
+    value: selector(point),
+    date: point.date
   }));
 
-  const pointSpacing = period === 'all-time' ? 56 : period === 'monthly' ? 48 : 64;
-  const chartWidthPx = Math.max(720, points.length * pointSpacing);
+  const toSmoothPath = (linePoints: Array<{ x: number; y: number }>) => {
+    if (linePoints.length === 0) return '';
+    if (linePoints.length === 1) return `M ${linePoints[0].x} ${linePoints[0].y}`;
+
+    let path = `M ${linePoints[0].x} ${linePoints[0].y}`;
+    for (let i = 0; i < linePoints.length - 1; i += 1) {
+      const p0 = linePoints[i - 1] || linePoints[i];
+      const p1 = linePoints[i];
+      const p2 = linePoints[i + 1];
+      const p3 = linePoints[i + 2] || p2;
+
+      const c1x = p1.x + (p2.x - p0.x) / 6;
+      const c1y = p1.y + (p2.y - p0.y) / 6;
+      const c2x = p2.x - (p3.x - p1.x) / 6;
+      const c2y = p2.y - (p3.y - p1.y) / 6;
+
+      path += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`;
+    }
+
+    return path;
+  };
+
+  const totalSeries = seriesPoints((point) => point.total);
+  const pirklandSeries = seriesPoints((point) => point.pirkland);
+  const melroseSeries = seriesPoints((point) => point.melrose);
+
+  const chartWidthPx = Math.max(960, parsedPoints.length * 64);
+
+  const formatTickDate = (date: Date) => `${date.getUTCMonth() + 1}/${date.getUTCDate()}/${date.getUTCFullYear()}`;
 
   return (
     <section className="space-y-6">
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
         <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Operations Attendance</div>
         <h2 className="mt-2 text-3xl font-semibold uppercase tracking-[0.2em] text-silver">Rally Tracker</h2>
-        <div className="mt-4 flex gap-2">
+        <div className="mt-4 flex flex-wrap gap-2">
           <button type="button" onClick={() => setPeriod('weekly')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${period === 'weekly' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Weekly</button>
           <button type="button" onClick={() => setPeriod('monthly')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${period === 'monthly' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>Monthly</button>
           <button type="button" onClick={() => setPeriod('all-time')} className={`rounded border px-3 py-2 text-xs uppercase tracking-[0.3em] ${period === 'all-time' ? 'border-silver/50 bg-silver text-slateBlue' : 'border-slateBlue/70 text-silver'}`}>All Time</button>
@@ -156,76 +251,109 @@ export default function RallyTrackerPage() {
       </div>
 
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
-        {points.length === 0 ? (
+        {parsedPoints.length === 0 ? (
           <p className="text-sm text-slate-400">No battle attendance logs in this period.</p>
         ) : (
           <>
-            <div className="mb-3 flex flex-wrap gap-4 text-xs uppercase tracking-[0.3em] text-slate-300">
-              <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-white" /> Total</span>
-              <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-blue-400" /> Pirkland</span>
-              <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-fuchsia-400" /> Melrose</span>
+            <div className="mb-4 inline-flex rounded border border-slateBlue/60 bg-[#0d121b] p-1 text-xs uppercase tracking-[0.25em]">
+              <button
+                type="button"
+                onClick={() => setView('total')}
+                className={`rounded px-3 py-2 transition ${view === 'total' ? 'bg-silver text-slateBlue' : 'text-slate-300'}`}
+              >
+                Total
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('company')}
+                className={`rounded px-3 py-2 transition ${view === 'company' ? 'bg-silver text-slateBlue' : 'text-slate-300'}`}
+              >
+                Company
+              </button>
             </div>
+
             <div className="overflow-x-auto pb-2">
               <svg
-                viewBox="0 0 100 100"
-                className="h-72 max-w-none rounded border border-slateBlue/60 bg-[#0d121b] p-2"
+                viewBox={`0 0 ${chartArea.width} ${chartArea.height}`}
+                className="h-[34rem] max-w-none rounded border border-[#8da1c7]/70 bg-[#b8c8df]"
                 style={{ width: `${chartWidthPx}px` }}
               >
-                {[0, 25, 50, 75, 100].map((_, index) => (
-                  <line key={index} x1="4" y1={10 + index * 20} x2="96" y2={10 + index * 20} stroke="rgba(148, 163, 184, 0.18)" strokeWidth="0.5" />
-                ))}
-                <polyline fill="none" stroke="#ffffff" strokeWidth="1.7" strokeDasharray="1.5 1.2" points={toPolyline((point) => point.total)} />
-                <polyline fill="none" stroke="#60a5fa" strokeWidth="1.7" points={toPolyline((point) => point.pirkland)} />
-                <polyline fill="none" stroke="#d946ef" strokeWidth="1.7" points={toPolyline((point) => point.melrose)} />
+                <text x={24} y={30} fill="#6b7280" fontSize="18" fontWeight="700">Grand Battery Rallies</text>
 
-                {pointCoordinates((point) => point.total).map((point, index) => (
-                  <g key={`total-${index}`}>
-                    <circle cx={point.x} cy={point.y} r="1.3" fill="#ffffff" />
-                    <circle cx={point.x} cy={point.y} r="2.4" fill="transparent">
-                      <title>{`${points[index]?.date ?? 'Unknown date'} | Total: ${point.value}`}</title>
-                    </circle>
+                {yTicks.map((tick) => {
+                  const y = yForValue(tick);
+                  return (
+                    <g key={`y-${tick}`}>
+                      <line x1={chartArea.marginLeft} y1={y} x2={chartArea.width - chartArea.marginRight} y2={y} stroke="rgba(71, 85, 105, 0.35)" strokeWidth="1" />
+                      <text x={chartArea.marginLeft - 12} y={y + 4} textAnchor="end" fill="#111827" fontSize="11" fontWeight="600">{tick}</text>
+                    </g>
+                  );
+                })}
+
+                {monthlyTicks.map((tick) => {
+                  const x = xForDate(tick);
+                  return (
+                    <g key={`x-${tick.toISOString()}`}>
+                      <line x1={x} y1={chartArea.marginTop} x2={x} y2={chartArea.height - chartArea.marginBottom} stroke="rgba(71, 85, 105, 0.22)" strokeWidth="1" />
+                      <text x={x} y={chartArea.height - chartArea.marginBottom + 22} textAnchor="middle" fill="#111827" fontSize="11" fontWeight="600">{formatTickDate(tick)}</text>
+                    </g>
+                  );
+                })}
+
+                <text x={chartArea.marginLeft - 42} y={chartArea.marginTop + 6} fill="#111827" fontSize="11" fontWeight="700" transform={`rotate(-90 ${chartArea.marginLeft - 42} ${chartArea.marginTop + 6})`}>Total</text>
+
+                {view === 'total' ? (
+                  <g>
+                    <g>
+                      <circle cx={chartArea.width / 2 - 26} cy={44} r="6" fill="#3559a8" />
+                      <text x={chartArea.width / 2 - 10} y={48} fill="#111827" fontSize="12" fontWeight="700">Total</text>
+                    </g>
+
+                    <path d={toSmoothPath(totalSeries)} fill="none" stroke="#496cb8" strokeWidth="5" strokeOpacity="0.85" />
+                    {totalSeries.map((point, index) => (
+                      <g key={`total-${index}`}>
+                        <circle cx={point.x} cy={point.y} r="4.8" fill="#3559a8" />
+                        <text x={point.x} y={point.y - 10} textAnchor="middle" fill="#496cb8" fontSize="10" fontWeight="700">{point.value}</text>
+                        <circle cx={point.x} cy={point.y} r="8" fill="transparent">
+                          <title>{`${point.date} | Total: ${point.value}`}</title>
+                        </circle>
+                      </g>
+                    ))}
                   </g>
-                ))}
-                {pointCoordinates((point) => point.pirkland).map((point, index) => (
-                  <g key={`pirkland-${index}`}>
-                    <circle cx={point.x} cy={point.y} r="1.2" fill="#60a5fa" />
-                    <circle cx={point.x} cy={point.y} r="2.4" fill="transparent">
-                      <title>{`${points[index]?.date ?? 'Unknown date'} | Pirkland: ${point.value}`}</title>
-                    </circle>
+                ) : (
+                  <g>
+                    <g>
+                      <circle cx={chartArea.width / 2 - 86} cy={44} r="6" fill="#5d84d8" />
+                      <text x={chartArea.width / 2 - 70} y={48} fill="#111827" fontSize="12" fontWeight="700">Pirkland</text>
+                      <circle cx={chartArea.width / 2 + 16} cy={44} r="6" fill="#8f4de8" />
+                      <text x={chartArea.width / 2 + 32} y={48} fill="#111827" fontSize="12" fontWeight="700">Melrose</text>
+                    </g>
+
+                    <path d={toSmoothPath(pirklandSeries)} fill="none" stroke="#5d84d8" strokeWidth="5" strokeOpacity="0.8" />
+                    <path d={toSmoothPath(melroseSeries)} fill="none" stroke="#8f4de8" strokeWidth="5" strokeOpacity="0.8" />
+
+                    {pirklandSeries.map((point, index) => (
+                      <g key={`pirkland-${index}`}>
+                        <circle cx={point.x} cy={point.y} r="4.3" fill="#5d84d8" />
+                        <text x={point.x} y={point.y - 10} textAnchor="middle" fill="#5d84d8" fontSize="10" fontWeight="700">{point.value}</text>
+                        <circle cx={point.x} cy={point.y} r="8" fill="transparent">
+                          <title>{`${point.date} | Pirkland: ${point.value}`}</title>
+                        </circle>
+                      </g>
+                    ))}
+
+                    {melroseSeries.map((point, index) => (
+                      <g key={`melrose-${index}`}>
+                        <circle cx={point.x} cy={point.y} r="4.3" fill="#8f4de8" />
+                        <text x={point.x} y={point.y - 10} textAnchor="middle" fill="#8f4de8" fontSize="10" fontWeight="700">{point.value}</text>
+                        <circle cx={point.x} cy={point.y} r="8" fill="transparent">
+                          <title>{`${point.date} | Melrose: ${point.value}`}</title>
+                        </circle>
+                      </g>
+                    ))}
                   </g>
-                ))}
-                {pointCoordinates((point) => point.melrose).map((point, index) => (
-                  <g key={`melrose-${index}`}>
-                    <circle cx={point.x} cy={point.y} r="1.2" fill="#d946ef" />
-                    <circle cx={point.x} cy={point.y} r="2.4" fill="transparent">
-                      <title>{`${points[index]?.date ?? 'Unknown date'} | Melrose: ${point.value}`}</title>
-                    </circle>
-                  </g>
-                ))}
+                )}
               </svg>
-            </div>
-
-            <div className="mt-4 overflow-auto rounded border border-slateBlue/60">
-              <table className="min-w-full text-left text-sm">
-                <thead className="bg-slateBlue/30 text-slate-200">
-                  <tr>
-                    <th className="px-3 py-2">Date</th>
-                    <th className="px-3 py-2">Melrose</th>
-                    <th className="px-3 py-2">Pirkland</th>
-                    <th className="px-3 py-2">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {points.map((point) => (
-                    <tr key={point.date} className="border-t border-slateBlue/40">
-                      <td className="px-3 py-2 text-slate-300">{point.date}</td>
-                      <td className="px-3 py-2 text-emerald-300">{point.melrose}</td>
-                      <td className="px-3 py-2 text-blue-300">{point.pirkland}</td>
-                      <td className="px-3 py-2 text-amber-300">{point.total}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
           </>
         )}

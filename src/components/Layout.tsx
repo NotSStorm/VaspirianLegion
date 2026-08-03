@@ -11,7 +11,6 @@ const navItems = [
   { to: '/lore', label: 'LORE' },
   { to: '/enlist', label: 'ENLIST' },
   { to: '/personnel', label: 'PERSONNEL' },
-  { to: '/command', label: 'COMMAND' },
   { to: '/battles', label: 'BATTLES' },
   { to: '/schedule', label: 'SCHEDULE' },
   { to: '/medals', label: 'MEDALS' },

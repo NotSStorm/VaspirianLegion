@@ -5,7 +5,6 @@ import HomePage from './pages/HomePage';
 import LorePage from './pages/LorePage';
 import EnlistPage from './pages/EnlistPage';
 import PersonnelPage from './pages/PersonnelPage';
-import CommandPage from './pages/CommandPage';
 import BattlesPage from './pages/BattlesPage';
 import SchedulePage from './pages/SchedulePage';
 import MedalsPage from './pages/MedalsPage';
@@ -99,7 +98,7 @@ function App() {
           )}
         />
         <Route path="/personnel" element={<PersonnelPage />} />
-        <Route path="/command" element={<CommandPage />} />
+        <Route path="/command" element={<Navigate to="/" replace />} />
         <Route path="/battles" element={<BattlesPage />} />
         <Route path="/schedule" element={<SchedulePage />} />
         <Route path="/medals" element={<MedalsPage />} />

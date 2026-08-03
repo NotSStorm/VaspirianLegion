@@ -4,6 +4,7 @@ import { getAuthenticatedState } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 
 const GROUP_ID = '5531725';
+const COMPANY_OPTIONS = ['82nd Pirkland', '87th Melrose', 'Battery Command', 'Unassigned'];
 
 type HeaderProfile = {
   discordUsername: string;
@@ -94,6 +95,9 @@ async function loadAvatarUrl(robloxId?: string | null, robloxUsername?: string |
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<HeaderProfile | null>(null);
+  const [companyDraft, setCompanyDraft] = useState('');
+  const [savingCompany, setSavingCompany] = useState(false);
+  const [companyMessage, setCompanyMessage] = useState<string | null>(null);
   const [avatarCandidates, setAvatarCandidates] = useState<string[]>([]);
   const [avatarIndex, setAvatarIndex] = useState(0);
   const [avatarLoading, setAvatarLoading] = useState(false);
@@ -170,6 +174,7 @@ export default function ProfilePage() {
         }
 
         setProfile(currentProfile);
+        setCompanyDraft(currentProfile.company || 'Unassigned');
         setLogs(filteredLogs);
         setBattlesById(battleMap);
         setAvatarCandidates(candidates);
@@ -193,6 +198,49 @@ export default function ProfilePage() {
       active = false;
     };
   }, []);
+
+  const saveCompanyPreference = async () => {
+    if (!profile) {
+      return;
+    }
+
+    const nextCompany = String(companyDraft || '').trim() || 'Unassigned';
+    setSavingCompany(true);
+    setCompanyMessage(null);
+
+    try {
+      const { profile: authProfile } = await getAuthenticatedState();
+      if (!authProfile?.id) {
+        throw new Error('You must be signed in to update your company.');
+      }
+
+      const [profileUpdate, rosterUpdate] = await Promise.all([
+        supabase
+          .from('profiles')
+          .update({ company: nextCompany })
+          .eq('id', authProfile.id),
+        supabase
+          .from('roster')
+          .update({ company: nextCompany })
+          .eq('profile_id', authProfile.id)
+      ]);
+
+      if (profileUpdate.error) {
+        throw profileUpdate.error;
+      }
+
+      if (rosterUpdate.error) {
+        throw rosterUpdate.error;
+      }
+
+      setProfile({ ...profile, company: nextCompany });
+      setCompanyMessage('Company updated.');
+    } catch (updateError) {
+      setCompanyMessage(updateError instanceof Error ? updateError.message : 'Unable to update company.');
+    } finally {
+      setSavingCompany(false);
+    }
+  };
 
   const careerTotals = useMemo(() => logs.reduce((accumulator, entry) => ({
     kills: accumulator.kills + (Number(entry.kills) || 0),
@@ -268,6 +316,29 @@ export default function ProfilePage() {
                 <div className="mt-4 text-xl font-semibold uppercase tracking-[0.2em] text-silver">{profile?.robloxUsername || profile?.discordUsername || 'Member'}</div>
                 <div className="mt-2 text-sm text-slate-300">{profile?.groupRank || 'Not yet synced'}{profile?.company ? ` • ${profile.company}` : ''}</div>
                 {profile?.callsign && <div className="mt-1 text-xs uppercase tracking-[0.3em] text-slate-400">{profile.callsign}</div>}
+                <div className="mt-4 w-full text-left">
+                  <label htmlFor="profile-company" className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Company Preference</label>
+                  <select
+                    id="profile-company"
+                    value={companyDraft}
+                    onChange={(event) => setCompanyDraft(event.target.value)}
+                    className="mt-2 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
+                    disabled={savingCompany}
+                  >
+                    {COMPANY_OPTIONS.map((company) => (
+                      <option key={company} value={company}>{company}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void saveCompanyPreference()}
+                    disabled={savingCompany || !companyDraft || companyDraft === (profile?.company || 'Unassigned')}
+                    className="mt-3 w-full rounded border border-slateBlue/70 px-3 py-2 text-xs uppercase tracking-[0.25em] text-slate-200 disabled:opacity-60"
+                  >
+                    {savingCompany ? 'Saving...' : 'Save Company'}
+                  </button>
+                  {companyMessage && <p className="mt-2 text-xs text-slate-300">{companyMessage}</p>}
+                </div>
               </div>
             </div>
 

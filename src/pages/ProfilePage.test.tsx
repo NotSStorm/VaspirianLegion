@@ -66,6 +66,7 @@ describe('ProfilePage', () => {
     render(<ProfilePage />);
 
     await waitFor(() => expect(screen.getByText(/member profile/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText(/loading profile/i)).toBeNull());
     expect(screen.getByText(/not yet synced/i)).toBeInTheDocument();
     expect(screen.queryByText(/^CST$/i)).toBeNull();
   });

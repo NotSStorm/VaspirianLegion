@@ -344,11 +344,27 @@ export default function PersonnelPage() {
       });
 
       const groupRankByProfileId = new Map<string, string>();
+      const groupRankByAlias = new Map<string, string>();
       rosterRecords.forEach((entry) => {
-        const rank = String(entry.group_rank || '').trim();
-        if (rank) {
-          groupRankByProfileId.set(entry.profile_id, sanitizeGroupRank(rank));
+        const resolvedRank = String(entry.group_rank || entry.rank || '').trim();
+        if (!resolvedRank) {
+          return;
         }
+
+        const sanitizedRank = sanitizeGroupRank(resolvedRank);
+        groupRankByProfileId.set(entry.profile_id, sanitizedRank);
+
+        const profile = resolveRosterProfile(entry.profile);
+        collectAliases([
+          profile?.roblox_username,
+          profile?.discord_username,
+          profile?.callsign,
+          entry.callsign
+        ]).forEach((alias) => {
+          if (!groupRankByAlias.has(alias)) {
+            groupRankByAlias.set(alias, sanitizedRank);
+          }
+        });
       });
 
       const battleParticipants = new Map<string, BattleLogParticipant>();
@@ -372,10 +388,11 @@ export default function PersonnelPage() {
           if (excludedNames.has(normalizeName(robloxName)) || excludedNames.has(normalizeName(profile?.callsign)) || excludedNames.has(normalizeName(entry.callsign))) {
             return null;
           }
-          if (!isRosterEligibleRank(entry.rank)) {
+          const effectiveRank = String(entry.group_rank || entry.rank || '').trim();
+          if (!isRosterEligibleRank(effectiveRank)) {
             return null;
           }
-          const groupRank = sanitizeGroupRank(entry.group_rank);
+          const groupRank = sanitizeGroupRank(effectiveRank);
 
           return {
             key: `profile:${entry.profile_id}`,
@@ -395,7 +412,12 @@ export default function PersonnelPage() {
           const normalized = normalizeName(entry.participant_name);
           const matchedProfile = profileAliases.get(normalized) || null;
           const directoryMatch = personnelByAlias.get(normalized) || null;
-          const sourceRank = (matchedProfile?.id ? groupRankByProfileId.get(matchedProfile.id) : null) || directoryMatch?.rank || null;
+          const sourceRank =
+            (matchedProfile?.id ? groupRankByProfileId.get(matchedProfile.id) : null)
+            || groupRankByAlias.get(normalized)
+            || matchedProfile?.rank
+            || directoryMatch?.rank
+            || null;
           if (!isRosterEligibleRank(sourceRank)) {
             return null;
           }

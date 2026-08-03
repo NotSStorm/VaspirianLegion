@@ -10,6 +10,7 @@ type ApplicationRecord = {
   service_number?: string | null;
   callsign: string;
   timezone: string;
+  requested_company?: string | null;
   requested_group_join: boolean;
   status: 'pending' | 'approved' | 'rejected' | string;
   reviewed_by?: string | null;
@@ -107,7 +108,7 @@ export default function AdminPage() {
       const [{ data: applicationData, error: applicationError }, { data: profileData, error: profileError }, { data: rosterData, error: rosterError }, personnelResponse, { data: battleData, error: battleError }] = await Promise.all([
         supabase
           .from('applications')
-          .select('id, profile_id, service_number, callsign, timezone, requested_group_join, status, reviewed_by, reviewed_at, created_at')
+          .select('id, profile_id, service_number, callsign, timezone, requested_company, requested_group_join, status, reviewed_by, reviewed_at, created_at')
           .order('created_at', { ascending: false }),
         supabase
           .from('profiles')
@@ -246,6 +247,7 @@ export default function AdminPage() {
   };
 
   const ensureRosterEntryForApprovedApplication = async (application: ApplicationRecord): Promise<RosterEnsureResult> => {
+    const requestedCompany = String(application.requested_company || '').trim() || null;
     const { data: existingRoster, error: rosterLookupError } = await supabase
       .from('roster')
       .select('profile_id, callsign')
@@ -257,6 +259,11 @@ export default function AdminPage() {
     }
 
     if (existingRoster) {
+      if (requestedCompany) {
+        await supabase.from('roster').update({ company: requestedCompany }).eq('profile_id', application.profile_id);
+        await supabase.from('profiles').update({ company: requestedCompany }).eq('id', application.profile_id);
+      }
+
       return {
         created: false,
         callsign: String(existingRoster.callsign || application.callsign || '').trim()
@@ -289,7 +296,7 @@ export default function AdminPage() {
     const { error: insertError } = await supabase.from('roster').insert({
       profile_id: application.profile_id,
       rank: 'CST',
-      company: null,
+      company: requestedCompany,
       callsign: resolvedCallsign
     });
 
@@ -302,6 +309,10 @@ export default function AdminPage() {
       }
 
       throw insertError;
+    }
+
+    if (requestedCompany) {
+      await supabase.from('profiles').update({ company: requestedCompany }).eq('id', application.profile_id);
     }
 
     return {
@@ -422,6 +433,9 @@ export default function AdminPage() {
                   <div>
                     <div className="text-sm font-semibold text-silver">{application.callsign || toDisplayName(applicant)}</div>
                     <div className="text-xs text-slate-400">Applicant: {toDisplayName(applicant)} • Timezone: {application.timezone || 'N/A'}</div>
+                    {application.requested_company && (
+                      <div className="mt-1 text-xs text-slate-300">Requested Company: {application.requested_company}</div>
+                    )}
                     <div className="mt-1 text-xs text-slate-500">Submitted {formatDateTime(application.created_at)}{application.service_number ? ` • ${application.service_number}` : ''}</div>
                   </div>
                   <div className="flex gap-2">
@@ -468,6 +482,9 @@ export default function AdminPage() {
                       <div>
                         <div className="text-sm font-semibold text-silver">{application.callsign || toDisplayName(applicant)}</div>
                         <div className="mt-1 text-xs text-slate-400">Applicant: {toDisplayName(applicant)} • Timezone: {application.timezone || 'N/A'}</div>
+                        {application.requested_company && (
+                          <div className="mt-1 text-xs text-slate-300">Requested Company: {application.requested_company}</div>
+                        )}
                         <div className="mt-1 text-xs text-slate-500">Approved {formatDateTime(application.reviewed_at)} by {toDisplayName(reviewer)}</div>
                         <div className={`mt-1 text-xs ${hasRosterEntry ? 'text-emerald-300' : 'text-amber-300'}`}>
                           {hasRosterEntry ? 'Roster entry exists' : 'Roster entry missing'}
@@ -499,6 +516,9 @@ export default function AdminPage() {
                   <div key={application.id} className="rounded border border-slateBlue/60 bg-[#0d121b] p-4">
                     <div className="text-sm font-semibold text-silver">{application.callsign || toDisplayName(applicant)}</div>
                     <div className="mt-1 text-xs text-slate-400">Applicant: {toDisplayName(applicant)} • Timezone: {application.timezone || 'N/A'}</div>
+                    {application.requested_company && (
+                      <div className="mt-1 text-xs text-slate-300">Requested Company: {application.requested_company}</div>
+                    )}
                     <div className="mt-1 text-xs text-slate-500">Rejected {formatDateTime(application.reviewed_at)} by {toDisplayName(reviewer)}</div>
                   </div>
                 );

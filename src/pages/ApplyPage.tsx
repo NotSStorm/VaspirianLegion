@@ -6,6 +6,7 @@ import { verifyMinimumGroupRank } from '../lib/auth';
 import type { Profile } from '../types';
 
 const TIMEZONE_PATTERN = /^(UTC|GMT|EST|EDT|CST|CDT|MST|MDT|PST|PDT|[A-Z]{2,4}|[A-Za-z]+(?:\/[A-Za-z_]+)*)$/;
+const COMPANY_OPTIONS = ['82nd Pirkland', '87th Melrose'];
 
 function normalizeDiscordName(raw?: string | null) {
   const value = raw?.trim() ?? '';
@@ -26,6 +27,7 @@ function resolveErrorMessage(error: unknown, fallback: string) {
 
 export default function ApplyPage() {
   const [timezone, setTimezone] = useState('');
+  const [requestedCompany, setRequestedCompany] = useState('');
   const [profile, setProfile] = useState<Profile | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -103,8 +105,12 @@ export default function ApplyPage() {
 
     const nextErrors: Record<string, string> = {};
     const normalizedTimezone = timezone.trim().toUpperCase();
+    const normalizedCompany = requestedCompany.trim();
     if (!normalizedTimezone || !TIMEZONE_PATTERN.test(normalizedTimezone)) {
       nextErrors.timezone = 'Enter a valid timezone such as EST, CST, MST, PST, or GMT.';
+    }
+    if (!COMPANY_OPTIONS.includes(normalizedCompany)) {
+      nextErrors.company = 'Select the company you want to join.';
     }
     if (!resolvedProfile?.id) {
       nextErrors.profile = 'You must sign in before submitting.';
@@ -122,6 +128,7 @@ export default function ApplyPage() {
         service_number: `APP-${Date.now().toString(36).toUpperCase()}`,
         callsign: callsign,
         timezone: normalizedTimezone,
+        requested_company: normalizedCompany,
         requested_group_join: true,
         status: 'pending'
       }).select('*').single();
@@ -173,6 +180,21 @@ export default function ApplyPage() {
               <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Timezone</div>
               <input id="timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} className="mt-2 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-silver" placeholder="e.g. EST, CST, GMT" />
               {errors.timezone && <p className="mt-2 text-sm text-red-400">{errors.timezone}</p>}
+            </label>
+            <label htmlFor="requested-company">
+              <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Preferred Company</div>
+              <select
+                id="requested-company"
+                value={requestedCompany}
+                onChange={(e) => setRequestedCompany(e.target.value)}
+                className="mt-2 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-silver"
+              >
+                <option value="">Select one</option>
+                {COMPANY_OPTIONS.map((company) => (
+                  <option key={company} value={company}>{company}</option>
+                ))}
+              </select>
+              {errors.company && <p className="mt-2 text-sm text-red-400">{errors.company}</p>}
             </label>
             {errors.profile && <p className="text-sm text-red-400">{errors.profile}</p>}
             {errors.submit && <p className="text-sm text-red-400">{errors.submit}</p>}
