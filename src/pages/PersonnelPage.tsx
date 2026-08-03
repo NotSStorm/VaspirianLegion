@@ -487,28 +487,8 @@ export default function PersonnelPage() {
         }))
         .filter((item) => item.username.length > 0);
 
-      const personnelDirectoryUsernames = personnelDirectoryRows
-        .map((entry) => String(entry.roblox_username || '').trim())
-        .filter((value) => Boolean(value));
-
-      const personnelUsernames = rows
-        .map((row) => {
-          const separator = ' - ';
-          const separatorIndex = row.combinedName.indexOf(separator);
-          if (separatorIndex === -1) {
-            return '';
-          }
-          return row.combinedName.slice(separatorIndex + separator.length).trim();
-        })
-        .filter((value) => Boolean(value));
-
-      const candidateUsernames = [
-        ...rowsWithUsernames.map((item) => item.username),
-        ...personnelDirectoryUsernames,
-        ...personnelUsernames
-      ];
       const usernameByKey = new Map<string, string>();
-      candidateUsernames.forEach((username) => {
+      rowsWithUsernames.forEach(({ username }) => {
         const trimmed = String(username || '').trim();
         if (!trimmed) {
           return;
@@ -701,7 +681,7 @@ export default function PersonnelPage() {
         };
       }> = [];
 
-      for (const username of uniqueUsernames) {
+      for (const { username } of rowsWithUsernames) {
         const usernameKey = username.toLowerCase();
         const rawResolvedRank = rankByUsername.get(usernameKey);
         if (!rawResolvedRank) {
