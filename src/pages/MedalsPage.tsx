@@ -17,6 +17,47 @@ type MedalRecord = {
   } | null;
 };
 
+type MedalOption = {
+  category: string;
+  name: string;
+};
+
+const MEDAL_OPTIONS: MedalOption[] = [
+  { category: 'Imperial Orders', name: "AHLGRIM'S CIRCLE" },
+  { category: 'Imperial Orders', name: 'IMPERIAL ORDER OF AHLGRIM' },
+  { category: 'Imperial Orders', name: 'ORDER OF THE ANDOURAN EMPIRE' },
+  { category: 'Imperial Orders', name: 'ORDER OF THE ARCHITECTS' },
+  { category: 'Imperial Orders', name: 'ORDER OF THE CITADEL' },
+  { category: 'Imperial Orders', name: 'ORDER OF THE GOLD GRIFFIN' },
+  { category: 'Shields', name: 'GOLD SHIELD' },
+  { category: 'Shields', name: 'SILVER SHIELD' },
+  { category: 'Shields', name: 'BRONZE SHIELD' },
+  { category: 'Regional Awards', name: 'EMBODIMENT OF VASPIRIA' },
+  { category: 'Corps Medals', name: 'GUARD KNIGHT COMMENDATION' },
+  { category: 'Corps Medals', name: 'IMPERIAL GUARD CROSS' },
+  { category: 'Corps Medals', name: 'ORDER OF THE WHITE TIGER' },
+  { category: 'Corps Medals', name: 'PROVINCIAL ARMY CROSS' },
+  { category: 'Regimental Awards', name: 'PARAGON OF MIGHT & HONOR' },
+  { category: 'Regimental Awards', name: 'IMPERIAL MERIT' },
+  { category: 'Regimental Awards', name: 'CROSS OF CONSUMMATE VALOR' },
+  { category: 'Regimental Awards', name: 'ARTISANS ACCOLADE' },
+  { category: 'Regimental Awards', name: 'CANNONEERS CROSS' },
+  { category: 'Regimental Awards', name: 'RECRUITMENT CROSS' },
+  { category: 'Regimental Awards', name: 'STAR OF SOLIDARITY' },
+  { category: 'Regimental Awards', name: 'COLOR GUARD CROSS' },
+  { category: 'Regimental Awards', name: 'VALOR IN DEATH' },
+  { category: 'Regimental Awards', name: 'HONORARY SERVICE' },
+  { category: 'Venerations', name: '1ST PRUSSIAN CAMPAIGN VENERATION' },
+  { category: 'Venerations', name: 'TOKUGAWA CAMPAIGN VENERATION' },
+  { category: 'Venerations', name: 'IBERIAN CAMPAIGN VENERATION' },
+  { category: 'Venerations', name: 'AMERICAN CAMPAIGN VENERATION' },
+  { category: 'Venerations', name: 'SHETLANDS CAMPAIGN VENERATION' },
+  { category: 'Venerations', name: '4 YEAR VENERATION' },
+  { category: 'Venerations', name: '27-36 MONTH VENERATIONS' },
+  { category: 'Venerations', name: '15-24 MONTH VENERATIONS' },
+  { category: 'Venerations', name: '3-12 MONTH VENERATIONS' }
+];
+
 export default function MedalsPage() {
   const [medals, setMedals] = useState<MedalRecord[]>([]);
   const [profiles, setProfiles] = useState<Array<{ id: string; roblox_username?: string | null; discord_username?: string | null }>>([]);
@@ -26,10 +67,15 @@ export default function MedalsPage() {
     recipientProfileId: '',
     medalName: '',
     citation: '',
-    campaignTag: '',
     dateAwarded: '',
     statusTags: 'Declassified'
   });
+
+  const medalOptionsByCategory = MEDAL_OPTIONS.reduce<Record<string, string[]>>((accumulator, option) => {
+    const existing = accumulator[option.category] || [];
+    accumulator[option.category] = [...existing, option.name];
+    return accumulator;
+  }, {});
 
   const loadMedals = async () => {
     setError(null);
@@ -64,11 +110,17 @@ export default function MedalsPage() {
   const addMedal = async () => {
     setError(null);
     try {
+      const selectedMedal = MEDAL_OPTIONS.find((option) => option.name === form.medalName) || null;
+      if (!selectedMedal) {
+        setError('Select a medal from the approved Vaspiria list.');
+        return;
+      }
+
       const { error: insertError } = await supabase.from('medals').insert({
         recipient_profile_id: form.recipientProfileId || null,
         medal_name: form.medalName,
         citation: form.citation,
-        campaign_tag: form.campaignTag,
+        campaign_tag: selectedMedal.category,
         date_awarded: form.dateAwarded,
         status_tags: form.statusTags.split(',').map((value) => value.trim()).filter(Boolean)
       });
@@ -78,7 +130,6 @@ export default function MedalsPage() {
         recipientProfileId: '',
         medalName: '',
         citation: '',
-        campaignTag: '',
         dateAwarded: '',
         statusTags: 'Declassified'
       });
@@ -120,10 +171,17 @@ export default function MedalsPage() {
                 <option key={profile.id} value={profile.id}>{profile.roblox_username || profile.discord_username || profile.id}</option>
               ))}
             </select>
-            <input value={form.medalName} onChange={(event) => setForm((prev) => ({ ...prev, medalName: event.target.value }))} placeholder="Medal name" className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
-            <input value={form.campaignTag} onChange={(event) => setForm((prev) => ({ ...prev, campaignTag: event.target.value }))} placeholder="Campaign tag" className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+            <select value={form.medalName} onChange={(event) => setForm((prev) => ({ ...prev, medalName: event.target.value }))} className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver">
+              <option value="">Medal</option>
+              {Object.entries(medalOptionsByCategory).map(([category, medals]) => (
+                <optgroup key={category} label={category}>
+                  {medals.map((medal) => (
+                    <option key={medal} value={medal}>{medal}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
             <input value={form.dateAwarded} onChange={(event) => setForm((prev) => ({ ...prev, dateAwarded: event.target.value }))} placeholder="Date awarded" className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
-            <input value={form.statusTags} onChange={(event) => setForm((prev) => ({ ...prev, statusTags: event.target.value }))} placeholder="Status tags (comma-separated)" className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
             <textarea value={form.citation} onChange={(event) => setForm((prev) => ({ ...prev, citation: event.target.value }))} placeholder="Citation" className="min-h-[100px] rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
             <button type="button" onClick={() => void addMedal()} className="rounded border border-silver/50 bg-silver px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slateBlue">Save Medal</button>
           </div>
