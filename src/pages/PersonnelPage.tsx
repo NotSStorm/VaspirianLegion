@@ -111,16 +111,6 @@ type BattleLogParticipant = {
   unit: string;
 };
 
-type ProfileRecord = {
-  id: string;
-  rank?: string | null;
-  company?: string | null;
-  roblox_username?: string | null;
-  roblox_id?: string | null;
-  discord_username?: string | null;
-  callsign?: string | null;
-};
-
 type RosterRecord = {
   id?: string;
   profile_id: string;
@@ -133,11 +123,15 @@ type RosterRecord = {
     roblox_id?: string | null;
     discord_username?: string | null;
     callsign?: string | null;
+    rank?: string | null;
+    company?: string | null;
   } | Array<{
     roblox_username?: string | null;
     roblox_id?: string | null;
     discord_username?: string | null;
     callsign?: string | null;
+    rank?: string | null;
+    company?: string | null;
   }> | null;
 };
 
@@ -290,10 +284,7 @@ export default function PersonnelPage() {
         throw rosterError;
       }
 
-      const [{ data: profileData }, { data: battleLogData }, personnelResponse] = await Promise.all([
-        supabase
-          .from('profiles')
-          .select('id, rank, company, roblox_username, roblox_id, discord_username, callsign'),
+      const [{ data: battleLogData }, personnelResponse] = await Promise.all([
         supabase
           .from('battle_stat_logs')
           .select('participant_name, unit, created_at')
@@ -327,13 +318,6 @@ export default function PersonnelPage() {
         medalsByProfile.set(recipientProfileId, [...existing, String(medal.medal_name)]);
       });
 
-      const profileAliases = new Map<string, ProfileRecord>();
-      ((profileData || []) as ProfileRecord[]).forEach((profile) => {
-        collectAliases([profile.roblox_username, profile.discord_username, profile.callsign]).forEach((alias) => {
-          profileAliases.set(alias, profile);
-        });
-      });
-
       const rosterRecords = (rosterData || []) as RosterRecord[];
       const personnelByAlias = new Map<string, PersonnelDirectoryRecord>();
       personnelDirectory.forEach((entry) => {
@@ -341,30 +325,6 @@ export default function PersonnelPage() {
         if (normalized) {
           personnelByAlias.set(normalized, entry);
         }
-      });
-
-      const groupRankByProfileId = new Map<string, string>();
-      const groupRankByAlias = new Map<string, string>();
-      rosterRecords.forEach((entry) => {
-        const resolvedRank = String(entry.group_rank || entry.rank || '').trim();
-        if (!resolvedRank) {
-          return;
-        }
-
-        const sanitizedRank = sanitizeGroupRank(resolvedRank);
-        groupRankByProfileId.set(entry.profile_id, sanitizedRank);
-
-        const profile = resolveRosterProfile(entry.profile);
-        collectAliases([
-          profile?.roblox_username,
-          profile?.discord_username,
-          profile?.callsign,
-          entry.callsign
-        ]).forEach((alias) => {
-          if (!groupRankByAlias.has(alias)) {
-            groupRankByAlias.set(alias, sanitizedRank);
-          }
-        });
       });
 
       const battleParticipants = new Map<string, BattleLogParticipant>();
@@ -385,14 +345,29 @@ export default function PersonnelPage() {
         rosterRecords.map(async (entry) => {
           const profile = resolveRosterProfile(entry.profile);
           const robloxName = resolveRosterUsername(entry) || 'Unknown';
+          const aliases = collectAliases([
+            robloxName,
+            profile?.roblox_username,
+            profile?.discord_username,
+            profile?.callsign,
+            entry.callsign
+          ]);
           if (excludedNames.has(normalizeName(robloxName)) || excludedNames.has(normalizeName(profile?.callsign)) || excludedNames.has(normalizeName(entry.callsign))) {
             return null;
           }
-          const effectiveRank = String(entry.group_rank || entry.rank || '').trim();
+          const directoryMatch = aliases
+            .map((alias) => personnelByAlias.get(alias) || null)
+            .find((match): match is PersonnelDirectoryRecord => Boolean(match)) || null;
+          const battleMatch = aliases
+            .map((alias) => battleParticipants.get(alias) || null)
+            .find((match): match is BattleLogParticipant => Boolean(match)) || null;
+
+          const effectiveRank = String(entry.group_rank || entry.rank || directoryMatch?.rank || profile?.rank || '').trim();
           if (!isRosterEligibleRank(effectiveRank)) {
             return null;
           }
           const groupRank = sanitizeGroupRank(effectiveRank);
+          const resolvedUnit = String(entry.company || profile?.company || directoryMatch?.unit || battleMatch?.unit || 'Unassigned').trim() || 'Unassigned';
 
           return {
             key: `profile:${entry.profile_id}`,
@@ -400,56 +375,16 @@ export default function PersonnelPage() {
             profileId: entry.profile_id,
             username: String(robloxName),
             combinedName: `${groupRank} - ${robloxName}`,
-            unit: entry.company || 'Unassigned',
+            unit: resolvedUnit,
             groupRank,
             medals: medalsByProfile.get(entry.profile_id) || []
           } as PersonnelSourceRow;
         })
       );
 
-      const battleRowsResolved = await Promise.all(
-        Array.from(battleParticipants.values()).map(async (entry) => {
-          const normalized = normalizeName(entry.participant_name);
-          const matchedProfile = profileAliases.get(normalized) || null;
-          const directoryMatch = personnelByAlias.get(normalized) || null;
-          const sourceRank =
-            (matchedProfile?.id ? groupRankByProfileId.get(matchedProfile.id) : null)
-            || groupRankByAlias.get(normalized)
-            || matchedProfile?.rank
-            || directoryMatch?.rank
-            || null;
-          if (!isRosterEligibleRank(sourceRank)) {
-            return null;
-          }
-          const groupRank = sanitizeGroupRank(sourceRank);
-
-          return {
-            key: matchedProfile ? `profile:${matchedProfile.id}` : `battle:${normalized}`,
-            priority: matchedProfile ? 1 : 0,
-            profileId: matchedProfile?.id || null,
-            username: String(entry.participant_name),
-            combinedName: `${groupRank} - ${entry.participant_name}`,
-            unit: matchedProfile?.company || directoryMatch?.unit || entry.unit || 'Unassigned',
-            groupRank,
-            medals: matchedProfile ? (medalsByProfile.get(matchedProfile.id) || []) : []
-          } as PersonnelSourceRow;
-        })
-      );
-
-      const mergedRows = new Map<string, PersonnelSourceRow>();
-
-      [...battleRowsResolved, ...rosterRowsResolved].forEach((row) => {
-        if (!row) {
-          return;
-        }
-        const existing = mergedRows.get(row.key);
-        if (!existing || row.priority > existing.priority) {
-          mergedRows.set(row.key, row);
-        }
-      });
-
       setRows(
-        Array.from(mergedRows.values())
+        rosterRowsResolved
+          .filter((row): row is PersonnelSourceRow => Boolean(row))
           .map((row) => row)
           .sort((left, right) => {
             const rankDelta = getRankSortWeight(right.groupRank) - getRankSortWeight(left.groupRank);
