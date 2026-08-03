@@ -554,7 +554,6 @@ async function fetchSyncUsernamesFromSupabase(env: any) {
           }
 
           if (callsignUsername) {
-            usernames.add(callsignUsername);
             diagnostics.rosterCallsigns += 1;
           }
         });
@@ -562,54 +561,6 @@ async function fetchSyncUsernamesFromSupabase(env: any) {
     }
   } catch {
     warnings.push('Roster source lookup failed due to timeout/network issue.');
-  }
-
-  try {
-    const personnelResponse = await fetchWithTimeout(
-      `${supabaseUrl}/rest/v1/personnel?select=roblox_username&limit=2000`,
-      { method: 'GET', headers },
-      6000
-    );
-
-    if (!personnelResponse.ok) {
-      warnings.push(`Personnel source lookup failed (${personnelResponse.status}).`);
-    } else {
-      const personnelPayload = await personnelResponse.json().catch(() => []);
-      if (Array.isArray(personnelPayload)) {
-        diagnostics.personnelRows = personnelPayload.length;
-        personnelPayload.forEach((row: any) => {
-          const username = String(row?.roblox_username || '').trim();
-          if (username) {
-            usernames.add(username);
-          }
-        });
-      }
-    }
-  } catch {
-    warnings.push('Personnel source lookup failed due to timeout/network issue.');
-  }
-
-  try {
-    const directoryResponse = await fetchWithTimeout(
-      `${supabaseUrl}/rest/v1/personnel_directory?select=roblox_username&limit=2000`,
-      { method: 'GET', headers },
-      6000
-    );
-
-    if (directoryResponse.ok) {
-      const directoryPayload = await directoryResponse.json().catch(() => []);
-      if (Array.isArray(directoryPayload)) {
-        diagnostics.personnelDirectoryRows = directoryPayload.length;
-        directoryPayload.forEach((row: any) => {
-          const username = String(row?.roblox_username || '').trim();
-          if (username) {
-            usernames.add(username);
-          }
-        });
-      }
-    }
-  } catch {
-    // Optional source; ignore failures silently.
   }
 
   return {
@@ -1112,10 +1063,9 @@ export default {
 
           const sourceResult = await fetchSyncUsernamesFromSupabase(env);
           const sourceWarnings = [...sourceResult.warnings];
-          const usernames = [
-            ...bodyUsernames,
-            ...sourceResult.usernames
-          ].map((value) => String(value || '').trim()).filter(Boolean);
+          const usernames = (bodyUsernames.length > 0 ? bodyUsernames : sourceResult.usernames)
+            .map((value) => String(value || '').trim())
+            .filter(Boolean);
           const usernameByKey = new Map<string, string>();
           usernames.forEach((username) => {
             const key = normalizeUsernameKey(username);

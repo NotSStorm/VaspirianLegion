@@ -266,6 +266,11 @@ export default function PersonnelPage() {
     return String(profile?.roblox_username || entry.callsign || profile?.discord_username || '').trim();
   };
 
+  const resolveRosterSyncUsername = (entry: RosterRecord) => {
+    const profile = resolveRosterProfile(entry.profile);
+    return String(profile?.roblox_username || '').trim();
+  };
+
   const loadPersonnel = async () => {
     setLoading(true);
 
@@ -483,7 +488,7 @@ export default function PersonnelPage() {
       const rowsWithUsernames = rosterRows
         .map((entry) => ({
           entry,
-          username: resolveRosterUsername(entry)
+          username: resolveRosterSyncUsername(entry)
         }))
         .filter((item) => item.username.length > 0);
 
