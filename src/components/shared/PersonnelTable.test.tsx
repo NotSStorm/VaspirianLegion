@@ -1,9 +1,9 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import PersonnelTable from './PersonnelTable';
 
 describe('PersonnelTable', () => {
-  it('shows the medal overflow popup only on hover and lets it escape the table bounds', () => {
+  it('shows the medal overflow popup only on hover and lets it escape the table bounds', async () => {
     render(
       <PersonnelTable
         rows={[
@@ -27,7 +27,10 @@ describe('PersonnelTable', () => {
     fireEvent.mouseEnter(overflowButton);
     expect(screen.getByText('MEDAL SIX')).toBeInTheDocument();
 
-    fireEvent.mouseLeave(overflowButton.parentElement as Element);
-    expect(screen.queryByText('MEDAL SIX')).not.toBeInTheDocument();
+    fireEvent.mouseLeave(overflowButton);
+
+    await waitFor(() => {
+      expect(screen.queryByText('MEDAL SIX')).not.toBeInTheDocument();
+    });
   });
 });

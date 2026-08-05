@@ -4,6 +4,15 @@ export type MedalOption = {
   emojiFile?: string;
 };
 
+function formatServiceVenerationName(months: number) {
+  if (months % 12 === 0) {
+    const years = months / 12;
+    return `${years} YEAR VENERATION`;
+  }
+
+  return `${months} MONTH VENERATION`;
+}
+
 export const MEDAL_OPTIONS: MedalOption[] = [
   { category: 'Imperial Orders', name: "AHLGRIM'S CIRCLE", emojiFile: 'AhlgrimsCircle.png' },
   { category: 'Imperial Orders', name: 'IMPERIAL ORDER OF AHLGRIM', emojiFile: 'ImperialOrderOfAldiron.png' },
@@ -73,20 +82,20 @@ export const MEDAL_OPTIONS: MedalOption[] = [
   { category: 'Campaign Venerations', name: 'AMERICAN CAMPAIGN VENERATION', emojiFile: 'AmericanCampaignVeneration.png' },
   { category: 'Campaign Venerations', name: 'SHETLANDS CAMPAIGN VENERATION', emojiFile: 'ShetlandsCampaignVeneration.png' },
 
-  { category: 'Service Venerations', name: 'VEN 3', emojiFile: 'VEN3.png' },
-  { category: 'Service Venerations', name: 'VEN 6', emojiFile: 'VEN6.png' },
-  { category: 'Service Venerations', name: 'VEN 9', emojiFile: 'VEN9.png' },
-  { category: 'Service Venerations', name: 'VEN 12', emojiFile: 'VEN12.png' },
-  { category: 'Service Venerations', name: 'VEN 15', emojiFile: 'VEN15.png' },
-  { category: 'Service Venerations', name: 'VEN 18', emojiFile: 'VEN18.png' },
-  { category: 'Service Venerations', name: 'VEN 21', emojiFile: 'VEN21.png' },
-  { category: 'Service Venerations', name: 'VEN 24', emojiFile: 'VEN24.png' },
-  { category: 'Service Venerations', name: 'VEN 27', emojiFile: 'VEN27.png' },
-  { category: 'Service Venerations', name: 'VEN 30', emojiFile: 'VEN30.png' },
-  { category: 'Service Venerations', name: 'VEN 33', emojiFile: 'VEN33.png' },
-  { category: 'Service Venerations', name: 'VEN 36', emojiFile: 'VEN36.png' },
-  { category: 'Service Venerations', name: 'VEN 48', emojiFile: 'VEN48.png' },
-  { category: 'Service Venerations', name: 'VEN 60', emojiFile: 'Ven60.png' }
+  { category: 'Service Venerations', name: formatServiceVenerationName(3), emojiFile: 'VEN3.png' },
+  { category: 'Service Venerations', name: formatServiceVenerationName(6), emojiFile: 'VEN6.png' },
+  { category: 'Service Venerations', name: formatServiceVenerationName(9), emojiFile: 'VEN9.png' },
+  { category: 'Service Venerations', name: formatServiceVenerationName(12), emojiFile: 'VEN12.png' },
+  { category: 'Service Venerations', name: formatServiceVenerationName(15), emojiFile: 'VEN15.png' },
+  { category: 'Service Venerations', name: formatServiceVenerationName(18), emojiFile: 'VEN18.png' },
+  { category: 'Service Venerations', name: formatServiceVenerationName(21), emojiFile: 'VEN21.png' },
+  { category: 'Service Venerations', name: formatServiceVenerationName(24), emojiFile: 'VEN24.png' },
+  { category: 'Service Venerations', name: formatServiceVenerationName(27), emojiFile: 'VEN27.png' },
+  { category: 'Service Venerations', name: formatServiceVenerationName(30), emojiFile: 'VEN30.png' },
+  { category: 'Service Venerations', name: formatServiceVenerationName(33), emojiFile: 'VEN33.png' },
+  { category: 'Service Venerations', name: formatServiceVenerationName(36), emojiFile: 'VEN36.png' },
+  { category: 'Service Venerations', name: formatServiceVenerationName(48), emojiFile: 'VEN48.png' },
+  { category: 'Service Venerations', name: formatServiceVenerationName(60), emojiFile: 'Ven60.png' }
 ];
 
 export const medalOptionsByCategory = MEDAL_OPTIONS.reduce<Record<string, string[]>>((accumulator, option) => {
@@ -126,7 +135,21 @@ const LEGACY_MEDAL_NAME_ALIASES: Record<string, string> = {
   'order of the gold griffin': 'OGG_Knight.png',
   'imperial order of ahlgrim': 'ImperialOrderOfAldiron.png',
   '1st prussian campaign veneration': 'AmericanCampaignVeneration.png',
-  'tokugawa campaign veneration': 'AmericanCampaignVeneration.png'
+  'tokugawa campaign veneration': 'AmericanCampaignVeneration.png',
+  'ven 3': 'VEN3.png',
+  'ven 6': 'VEN6.png',
+  'ven 9': 'VEN9.png',
+  'ven 12': 'VEN12.png',
+  'ven 15': 'VEN15.png',
+  'ven 18': 'VEN18.png',
+  'ven 21': 'VEN21.png',
+  'ven 24': 'VEN24.png',
+  'ven 27': 'VEN27.png',
+  'ven 30': 'VEN30.png',
+  'ven 33': 'VEN33.png',
+  'ven 36': 'VEN36.png',
+  'ven 48': 'VEN48.png',
+  'ven 60': 'Ven60.png'
 };
 
 export function getMedalEmojiPath(medalName: string) {

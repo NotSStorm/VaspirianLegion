@@ -1,6 +1,7 @@
 import AssignmentSelect from './AssignmentSelect';
 import { getMedalEmojiPath } from '../../lib/medals';
-import { useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useEffect, useRef, useState } from 'react';
 
 interface PersonnelRow {
   key?: string;
@@ -22,9 +23,63 @@ interface PersonnelTableProps {
 
 export default function PersonnelTable({ rows, editableUnits = false, unitOptions = [], updatingUnitKey = null, onUnitChange }: PersonnelTableProps) {
   const [openMedalMenuKey, setOpenMedalMenuKey] = useState<string | null>(null);
+  const [medalMenuStyle, setMedalMenuStyle] = useState<{ top: number; left: number } | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
+
+  const openMedalMenu = (rowKey: string, anchorElement: HTMLElement) => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+
+    const anchorRect = anchorElement.getBoundingClientRect();
+    const popupWidth = 320;
+    const viewportMargin = 12;
+    const spaceBelow = window.innerHeight - anchorRect.bottom - viewportMargin;
+    const spaceAbove = anchorRect.top - viewportMargin;
+    const estimatedHeight = 220;
+    const fitsBelow = spaceBelow >= estimatedHeight || spaceBelow >= spaceAbove;
+    const top = fitsBelow
+      ? Math.min(anchorRect.bottom + 8, window.innerHeight - viewportMargin)
+      : Math.max(viewportMargin, anchorRect.top - estimatedHeight - 8);
+    const left = Math.min(
+      Math.max(viewportMargin, anchorRect.right - popupWidth),
+      window.innerWidth - popupWidth - viewportMargin
+    );
+
+    setMedalMenuStyle({ top, left });
+    setOpenMedalMenuKey(rowKey);
+  };
+
+  const scheduleCloseMedalMenu = (rowKey: string) => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+    }
+
+    closeTimerRef.current = window.setTimeout(() => {
+      setOpenMedalMenuKey((current) => (current === rowKey ? null : current));
+      setMedalMenuStyle((current) => (current ? null : current));
+      closeTimerRef.current = null;
+    }, 180);
+  };
+
+  const keepMedalMenuOpen = () => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
 
   return (
-    <div className="overflow-visible rounded border border-slateBlue/60 bg-[#141a24]">
+    <div className="overflow-hidden rounded border border-slateBlue/60 bg-[#141a24]">
       <table className="min-w-full text-left text-sm">
         <thead className="bg-slateBlue/30 text-slate-200">
           <tr>
@@ -61,10 +116,7 @@ export default function PersonnelTable({ rows, editableUnits = false, unitOption
                   {row.medals.length === 0 ? (
                     <span className="text-slate-500">None</span>
                   ) : (
-                    <div
-                      className="relative flex items-center overflow-visible"
-                      onMouseLeave={() => setOpenMedalMenuKey((current) => (current === rowKey ? null : current))}
-                    >
+                    <div className="relative flex items-center">
                       {row.medals.slice(0, 5).map((medal, medalIndex) => {
                         const emojiPath = getMedalEmojiPath(medal);
 
@@ -90,40 +142,13 @@ export default function PersonnelTable({ rows, editableUnits = false, unitOption
                       {row.medals.length > 5 && (
                         <button
                           type="button"
-                          onClick={() => setOpenMedalMenuKey((current) => (current === rowKey ? null : rowKey))}
-                          onMouseEnter={() => setOpenMedalMenuKey(rowKey)}
+                          onMouseEnter={(event) => openMedalMenu(rowKey, event.currentTarget)}
+                          onMouseLeave={() => scheduleCloseMedalMenu(rowKey)}
                           className="ml-2 inline-flex h-8 min-w-8 items-center justify-center rounded-full border border-silver/40 bg-[#0d121b] px-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300"
                           aria-expanded={openMedalMenuKey === rowKey}
                         >
                           +{row.medals.length - 5}
                         </button>
-                      )}
-
-                      {openMedalMenuKey === rowKey && (
-                        <div
-                          className="absolute right-0 top-10 z-30 w-80 rounded border border-slateBlue/70 bg-[#0d121b] p-3 shadow-xl"
-                          onMouseEnter={() => setOpenMedalMenuKey(rowKey)}
-                          onMouseLeave={() => setOpenMedalMenuKey((current) => (current === rowKey ? null : current))}
-                        >
-                          <div className="mb-2 text-[10px] uppercase tracking-[0.25em] text-slate-400">All Medals</div>
-                          <div className="flex flex-wrap gap-2">
-                            {row.medals.map((medal, medalIndex) => {
-                              const emojiPath = getMedalEmojiPath(medal);
-                              return (
-                                <div key={`dropdown:${rowKey}:${medal}:${medalIndex}`} className="flex items-center gap-2 rounded px-2 py-1 hover:bg-slateBlue/20">
-                                  {emojiPath ? (
-                                    <img src={emojiPath} alt={medal} className="h-6 w-6 object-contain" />
-                                  ) : (
-                                    <span className="inline-flex h-6 w-6 items-center justify-center text-[9px] font-semibold uppercase text-slate-300">
-                                      {medal.slice(0, 2)}
-                                    </span>
-                                  )}
-                                  <span className="text-xs text-slate-200">{medal}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
                       )}
                     </div>
                   )}
@@ -133,6 +158,36 @@ export default function PersonnelTable({ rows, editableUnits = false, unitOption
           );})}
         </tbody>
       </table>
+      {openMedalMenuKey && medalMenuStyle && createPortal(
+        <div
+          className="fixed z-50 w-80 rounded border border-slateBlue/70 bg-[#0d121b] p-3 shadow-xl"
+          style={{ top: `${medalMenuStyle.top}px`, left: `${medalMenuStyle.left}px` }}
+          onMouseEnter={keepMedalMenuOpen}
+          onMouseLeave={() => scheduleCloseMedalMenu(openMedalMenuKey)}
+        >
+          <div className="mb-2 text-[10px] uppercase tracking-[0.25em] text-slate-400">All Medals</div>
+          <div className="flex flex-wrap gap-2">
+            {rows
+              .find((row) => (row.key || row.combinedName) === openMedalMenuKey)
+              ?.medals.map((medal, medalIndex) => {
+                const emojiPath = getMedalEmojiPath(medal);
+                return (
+                  <div key={`dropdown:${openMedalMenuKey}:${medal}:${medalIndex}`} className="flex items-center gap-2 rounded px-2 py-1 hover:bg-slateBlue/20">
+                    {emojiPath ? (
+                      <img src={emojiPath} alt={medal} className="h-6 w-6 object-contain" />
+                    ) : (
+                      <span className="inline-flex h-6 w-6 items-center justify-center text-[9px] font-semibold uppercase text-slate-300">
+                        {medal.slice(0, 2)}
+                      </span>
+                    )}
+                    <span className="text-xs text-slate-200">{medal}</span>
+                  </div>
+                );
+              })}
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

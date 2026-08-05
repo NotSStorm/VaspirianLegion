@@ -34,6 +34,7 @@ type HighScoreEntry = {
   kills: number;
   deaths: number;
   assists: number;
+  date: string;
 };
 
 type Metric = 'kills' | 'deaths' | 'assists' | 'events' | 'high-scores';
@@ -163,7 +164,8 @@ export default function LeaderboardPage() {
         unit: entry.unit,
         kills: entry.kills,
         deaths: entry.deaths,
-        assists: entry.assists
+        assists: entry.assists,
+        date: entry.date
       }))
       .sort((a, b) => {
         const selectedDelta = b[selectedMetric] - a[selectedMetric];
@@ -243,7 +245,8 @@ export default function LeaderboardPage() {
         unit: log.unit,
         kills: Number(log.kills) || 0,
         deaths: Number(log.deaths) || 0,
-        assists: Number(log.assists) || 0
+        assists: Number(log.assists) || 0,
+        date: resolveLogDate(log)?.toISOString().slice(0, 10) || 'N/A'
       })),
       selectedMetric
     );
@@ -262,10 +265,11 @@ export default function LeaderboardPage() {
               </div>
               {ranked.map((entry, index) => (
                 <div key={`${selectedMetric}-${entry.id}-${index}`} className="grid grid-cols-[minmax(0,1fr)_84px] items-center gap-2 rounded border border-slateBlue/50 bg-[#0d121b] px-3 py-2">
-                  <div className="truncate text-xs text-slate-300">
+                  <div className="min-w-0 text-xs text-slate-300">
                     <span className="text-slate-400">#{index + 1}</span>
                     <span className="ml-2 font-semibold text-silver">{entry.name}</span>
                     <span className="ml-1 text-slate-500">({entry.unit || 'Unassigned'})</span>
+                    <div className="mt-1 text-[10px] uppercase tracking-[0.2em] text-slate-500">Date: {entry.date}</div>
                   </div>
                   <div className="text-right font-mono text-xs text-slate-200">{entry[selectedMetric]}</div>
                 </div>
