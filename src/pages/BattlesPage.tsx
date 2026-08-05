@@ -190,6 +190,7 @@ export default function BattlesPage() {
     () => battles.slice(0, visibleBattleCount),
     [battles, visibleBattleCount]
   );
+  const canResetBattleList = visibleBattleCount > 12;
 
   const inferUnit = (participantName: string) => {
     const normalized = participantName.replace(/[_\s]+/g, '').toLowerCase();
@@ -552,6 +553,21 @@ export default function BattlesPage() {
             <span>Show 12 more battles</span>
             <span className="rounded border border-slateBlue/60 px-2 py-1 text-[10px] tracking-[0.3em] text-slate-400">
               {Math.min(12, battles.length - visibleBattleCount)}
+            </span>
+          </button>
+        </div>
+      )}
+
+      {canResetBattleList && (
+        <div className="rounded border border-slateBlue/70 bg-[#141a24] p-4">
+          <button
+            type="button"
+            onClick={() => setVisibleBattleCount(12)}
+            className="flex w-full items-center justify-between gap-3 text-left text-xs uppercase tracking-[0.3em] text-slate-300"
+          >
+            <span>Hide all extra battles</span>
+            <span className="rounded border border-slateBlue/60 px-2 py-1 text-[10px] tracking-[0.3em] text-slate-400">
+              Reset to 12
             </span>
           </button>
         </div>

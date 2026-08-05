@@ -94,6 +94,11 @@ describe('MedalsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /show 12 more medals/i }));
 
     expect(screen.getByText('Medal 25')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /show 12 more medals/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /hide all extra medals/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /hide all extra medals/i }));
+
+    expect(screen.getByText('Medal 12')).toBeInTheDocument();
+    expect(screen.queryByText('Medal 13')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /show 12 more medals/i })).toBeInTheDocument();
   });
 });

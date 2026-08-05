@@ -94,7 +94,11 @@ describe('BattlesPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /show 12 more battles/i }));
 
     expect(screen.getAllByRole('button', { name: /view logs/i })).toHaveLength(25);
-    expect(screen.queryByRole('button', { name: /show 12 more battles/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /hide all extra battles/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /hide all extra battles/i }));
+
+    expect(screen.getAllByRole('button', { name: /view logs/i })).toHaveLength(12);
+    expect(screen.getByRole('button', { name: /show 12 more battles/i })).toBeInTheDocument();
   });
   
     it('scrolls to the battle editor and preloads form values when clicking Edit Battle', async () => {
