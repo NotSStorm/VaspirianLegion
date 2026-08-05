@@ -79,7 +79,7 @@ export default function BattlesPage() {
   const [unitByName, setUnitByName] = useState<Record<string, string>>({});
   const [isStaff, setIsStaff] = useState(false);
   const [hasSession, setHasSession] = useState(false);
-  const [showOlderBattles, setShowOlderBattles] = useState(false);
+  const [visibleBattleCount, setVisibleBattleCount] = useState(12);
   const [selectedBattleId, setSelectedBattleId] = useState<string>('');
   const [expandedBattleId, setExpandedBattleId] = useState<string>('');
   const [logText, setLogText] = useState('');
@@ -185,10 +185,10 @@ export default function BattlesPage() {
   const selectedLogs = useMemo(() => logs.filter((entry) => entry.battle_id === selectedBattleId), [logs, selectedBattleId]);
   const selectedBattle = useMemo(() => battles.find((battle) => battle.id === selectedBattleId) || null, [battles, selectedBattleId]);
 
-  const hasOlderBattles = battles.length > 4;
+  const hasOlderBattles = battles.length > visibleBattleCount;
   const visibleBattles = useMemo(
-    () => (showOlderBattles ? battles : battles.slice(0, 4)),
-    [battles, showOlderBattles]
+    () => battles.slice(0, visibleBattleCount),
+    [battles, visibleBattleCount]
   );
 
   const inferUnit = (participantName: string) => {
@@ -399,8 +399,8 @@ export default function BattlesPage() {
     }
   };
 
-  const toggleOlderBattles = () => {
-    setShowOlderBattles((current) => !current);
+  const showMoreBattles = () => {
+    setVisibleBattleCount((current) => Math.min(current + 12, battles.length));
   };
 
   const importLogs = async () => {
@@ -545,14 +545,13 @@ export default function BattlesPage() {
         <div className="rounded border border-slateBlue/70 bg-[#141a24] p-4">
           <button
             type="button"
-            onClick={toggleOlderBattles}
-            aria-expanded={showOlderBattles}
+            onClick={showMoreBattles}
             aria-controls="battles-list"
             className="flex w-full items-center justify-between gap-3 text-left text-xs uppercase tracking-[0.3em] text-slate-300"
           >
-            <span>{showOlderBattles ? 'Hide past battles' : 'Show past battles'}</span>
+            <span>Show 12 more battles</span>
             <span className="rounded border border-slateBlue/60 px-2 py-1 text-[10px] tracking-[0.3em] text-slate-400">
-              {battles.length - 4}
+              {Math.min(12, battles.length - visibleBattleCount)}
             </span>
           </button>
         </div>

@@ -51,7 +51,7 @@ describe('BattlesPage', () => {
       if (table === 'battles') {
         return {
           select: vi.fn(() => ({
-            order: vi.fn().mockResolvedValue({ data: makeBattles(6), error: null })
+            order: vi.fn().mockResolvedValue({ data: makeBattles(25), error: null })
           }))
         };
       }
@@ -76,20 +76,25 @@ describe('BattlesPage', () => {
     });
   });
 
-  it('shows only 4 battles by default and reveals older battles on toggle', async () => {
+  it('shows battles in 12-item chunks each time the button is pushed', async () => {
     render(<BattlesPage />);
 
     await waitFor(() => {
       expect(screen.getByText(/battles ledger/i)).toBeInTheDocument();
     });
 
-    expect(screen.getAllByRole('button', { name: /view logs/i })).toHaveLength(4);
-    expect(screen.getByRole('button', { name: /show past battles/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /view logs/i })).toHaveLength(12);
+    expect(screen.getByRole('button', { name: /show 12 more battles/i })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /show past battles/i }));
+    fireEvent.click(screen.getByRole('button', { name: /show 12 more battles/i }));
 
-    expect(screen.getAllByRole('button', { name: /view logs/i })).toHaveLength(6);
-    expect(screen.getByRole('button', { name: /hide past battles/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /view logs/i })).toHaveLength(24);
+    expect(screen.getByRole('button', { name: /show 12 more battles/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /show 12 more battles/i }));
+
+    expect(screen.getAllByRole('button', { name: /view logs/i })).toHaveLength(25);
+    expect(screen.queryByRole('button', { name: /show 12 more battles/i })).not.toBeInTheDocument();
   });
   
     it('scrolls to the battle editor and preloads form values when clicking Edit Battle', async () => {
