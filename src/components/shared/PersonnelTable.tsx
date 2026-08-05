@@ -61,15 +61,8 @@ export default function PersonnelTable({ rows, editableUnits = false, unitOption
                   {row.medals.length === 0 ? (
                     <span className="text-slate-500">None</span>
                   ) : (
-                    <div
-                      className="relative flex items-center"
-                      onMouseLeave={() => {
-                        if (openMedalMenuKey === rowKey) {
-                          setOpenMedalMenuKey(null);
-                        }
-                      }}
-                    >
-                      {row.medals.slice(0, 4).map((medal, medalIndex) => {
+                    <div className="relative flex items-center">
+                      {row.medals.slice(0, 5).map((medal, medalIndex) => {
                         const emojiPath = getMedalEmojiPath(medal);
 
                         return (
@@ -91,7 +84,7 @@ export default function PersonnelTable({ rows, editableUnits = false, unitOption
                           </div>
                         );
                       })}
-                      {row.medals.length > 4 && (
+                      {row.medals.length > 5 && (
                         <button
                           type="button"
                           onClick={() => setOpenMedalMenuKey((current) => (current === rowKey ? null : rowKey))}
@@ -99,14 +92,14 @@ export default function PersonnelTable({ rows, editableUnits = false, unitOption
                           className="ml-2 inline-flex h-8 min-w-8 items-center justify-center rounded-full border border-silver/40 bg-[#0d121b] px-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300"
                           aria-expanded={openMedalMenuKey === rowKey}
                         >
-                          +{row.medals.length - 4}
+                          +{row.medals.length - 5}
                         </button>
                       )}
 
                       {openMedalMenuKey === rowKey && (
-                        <div className="absolute right-0 top-10 z-30 max-h-64 w-72 overflow-auto rounded border border-slateBlue/70 bg-[#0d121b] p-2 shadow-xl">
+                        <div className="absolute right-0 top-10 z-30 w-80 rounded border border-slateBlue/70 bg-[#0d121b] p-3 shadow-xl">
                           <div className="mb-2 text-[10px] uppercase tracking-[0.25em] text-slate-400">All Medals</div>
-                          <div className="space-y-1">
+                          <div className="flex flex-wrap gap-2">
                             {row.medals.map((medal, medalIndex) => {
                               const emojiPath = getMedalEmojiPath(medal);
                               return (

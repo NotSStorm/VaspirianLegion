@@ -124,14 +124,14 @@ export default function MedalsPage() {
 
   const filteredMedalsForOne = useMemo(() => {
     const query = medalSearch.trim().toLowerCase();
-    if (!query) return MEDAL_OPTIONS.slice(0, 10);
-    return MEDAL_OPTIONS.filter((option) => [option.name, option.category].join(' ').toLowerCase().includes(query)).slice(0, 20);
+    if (!query) return MEDAL_OPTIONS.slice(0, 8);
+    return MEDAL_OPTIONS.filter((option) => [option.name, option.category].join(' ').toLowerCase().includes(query)).slice(0, 12);
   }, [medalSearch]);
 
   const filteredMedalsForSingle = useMemo(() => {
     const query = singleMedalSearch.trim().toLowerCase();
-    if (!query) return MEDAL_OPTIONS.slice(0, 10);
-    return MEDAL_OPTIONS.filter((option) => [option.name, option.category].join(' ').toLowerCase().includes(query)).slice(0, 20);
+    if (!query) return MEDAL_OPTIONS.slice(0, 8);
+    return MEDAL_OPTIONS.filter((option) => [option.name, option.category].join(' ').toLowerCase().includes(query)).slice(0, 12);
   }, [singleMedalSearch]);
 
   const selectedRecipients = useMemo(
@@ -424,9 +424,9 @@ export default function MedalsPage() {
               <div className="text-xs text-slate-400">Selected medal: {selectedMedalName || 'None'}</div>
 
               <input
+                type="date"
                 value={dateAwarded}
                 onChange={(event) => setDateAwarded(event.target.value)}
-                placeholder="Date awarded (e.g. 2026-08-05)"
                 className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
               />
               <button
@@ -508,9 +508,9 @@ export default function MedalsPage() {
               </div>
 
               <input
+                type="date"
                 value={singleDateAwarded}
                 onChange={(event) => setSingleDateAwarded(event.target.value)}
-                placeholder="Date awarded (e.g. 2026-08-05)"
                 className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
               />
               <button

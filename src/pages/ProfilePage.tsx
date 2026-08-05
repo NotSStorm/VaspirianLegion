@@ -292,12 +292,12 @@ export default function ProfilePage() {
   const filteredMedalRequestOptions = useMemo(() => {
     const query = medalRequestSearch.trim().toLowerCase();
     if (!query) {
-      return MEDAL_OPTIONS.slice(0, 12);
+      return MEDAL_OPTIONS.slice(0, 6);
     }
 
     return MEDAL_OPTIONS
       .filter((option) => [option.name, option.category].join(' ').toLowerCase().includes(query))
-      .slice(0, 20);
+      .slice(0, 10);
   }, [medalRequestSearch]);
 
   const submitMedalRequest = async () => {
