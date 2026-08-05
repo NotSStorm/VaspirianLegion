@@ -24,7 +24,7 @@ export default function PersonnelTable({ rows, editableUnits = false, unitOption
   const [openMedalMenuKey, setOpenMedalMenuKey] = useState<string | null>(null);
 
   return (
-    <div className="overflow-hidden rounded border border-slateBlue/60 bg-[#141a24]">
+    <div className="overflow-visible rounded border border-slateBlue/60 bg-[#141a24]">
       <table className="min-w-full text-left text-sm">
         <thead className="bg-slateBlue/30 text-slate-200">
           <tr>
@@ -61,7 +61,10 @@ export default function PersonnelTable({ rows, editableUnits = false, unitOption
                   {row.medals.length === 0 ? (
                     <span className="text-slate-500">None</span>
                   ) : (
-                    <div className="relative flex items-center">
+                    <div
+                      className="relative flex items-center overflow-visible"
+                      onMouseLeave={() => setOpenMedalMenuKey((current) => (current === rowKey ? null : current))}
+                    >
                       {row.medals.slice(0, 5).map((medal, medalIndex) => {
                         const emojiPath = getMedalEmojiPath(medal);
 
@@ -97,7 +100,11 @@ export default function PersonnelTable({ rows, editableUnits = false, unitOption
                       )}
 
                       {openMedalMenuKey === rowKey && (
-                        <div className="absolute right-0 top-10 z-30 w-80 rounded border border-slateBlue/70 bg-[#0d121b] p-3 shadow-xl">
+                        <div
+                          className="absolute right-0 top-10 z-30 w-80 rounded border border-slateBlue/70 bg-[#0d121b] p-3 shadow-xl"
+                          onMouseEnter={() => setOpenMedalMenuKey(rowKey)}
+                          onMouseLeave={() => setOpenMedalMenuKey((current) => (current === rowKey ? null : current))}
+                        >
                           <div className="mb-2 text-[10px] uppercase tracking-[0.25em] text-slate-400">All Medals</div>
                           <div className="flex flex-wrap gap-2">
                             {row.medals.map((medal, medalIndex) => {

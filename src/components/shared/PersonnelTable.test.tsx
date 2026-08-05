@@ -1,9 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import PersonnelTable from './PersonnelTable';
 
 describe('PersonnelTable', () => {
-  it('shows five medals inline and hides the rest behind the overflow menu', () => {
+  it('shows the medal overflow popup only on hover and lets it escape the table bounds', () => {
     render(
       <PersonnelTable
         rows={[
@@ -20,6 +20,14 @@ describe('PersonnelTable', () => {
     expect(screen.getByTitle('MEDAL ONE')).toBeInTheDocument();
     expect(screen.getByTitle('MEDAL FIVE')).toBeInTheDocument();
     expect(screen.queryByTitle('MEDAL SIX')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /\+1/ })).toBeInTheDocument();
+
+    const overflowButton = screen.getByRole('button', { name: /\+1/ });
+    expect(screen.queryByText('MEDAL SIX')).not.toBeInTheDocument();
+
+    fireEvent.mouseEnter(overflowButton);
+    expect(screen.getByText('MEDAL SIX')).toBeInTheDocument();
+
+    fireEvent.mouseLeave(overflowButton.parentElement as Element);
+    expect(screen.queryByText('MEDAL SIX')).not.toBeInTheDocument();
   });
 });
