@@ -1,4 +1,5 @@
 import AssignmentSelect from './AssignmentSelect';
+import { getMedalEmojiPath } from '../../lib/medals';
 
 interface PersonnelRow {
   key?: string;
@@ -53,14 +54,39 @@ export default function PersonnelTable({ rows, editableUnits = false, unitOption
               </td>
               <td className="px-4 py-3">{row.groupRank || 'Not yet synced'}</td>
               <td className="px-4 py-3">
-                <div className="flex flex-wrap gap-2">
+                <div className="flex justify-end">
                   {row.medals.length === 0 ? (
                     <span className="text-slate-500">None</span>
-                  ) : row.medals.slice(0, 3).map((medal) => (
-                    <span key={medal} className="rounded border border-slateBlue/60 px-2 py-1 text-[10px] uppercase tracking-[0.25em] text-slate-300">{medal}</span>
-                  ))}
-                  {row.medals.length > 3 && (
-                    <span className="rounded border border-silver/30 px-2 py-1 text-[10px] uppercase tracking-[0.25em] text-slate-400">+{row.medals.length - 3} more</span>
+                  ) : (
+                    <div className="flex items-center">
+                      {row.medals.slice(0, 5).map((medal, medalIndex) => {
+                        const emojiPath = getMedalEmojiPath(medal);
+
+                        return (
+                          <span
+                            key={`${rowKey}:${medal}:${medalIndex}`}
+                            className={`group/medal relative inline-flex h-8 w-8 items-center justify-center rounded-full border border-slateBlue/70 bg-[#0d121b] shadow-sm ${medalIndex === 0 ? '' : '-ml-2'}`}
+                            title={medal}
+                          >
+                            {emojiPath ? (
+                              <img src={emojiPath} alt={medal} className="h-7 w-7 rounded-full object-cover" />
+                            ) : (
+                              <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-300">
+                                {medal.slice(0, 2)}
+                              </span>
+                            )}
+                            <span className="pointer-events-none absolute -top-9 left-1/2 z-20 hidden -translate-x-1/2 whitespace-nowrap rounded border border-slateBlue/70 bg-[#0d121b] px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-slate-200 group-hover/medal:block">
+                              {medal}
+                            </span>
+                          </span>
+                        );
+                      })}
+                      {row.medals.length > 5 && (
+                        <span className="ml-2 inline-flex h-8 min-w-8 items-center justify-center rounded-full border border-silver/40 bg-[#0d121b] px-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-300">
+                          +{row.medals.length - 5}
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
               </td>

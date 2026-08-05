@@ -1,7 +1,7 @@
 interface MedalCardProps {
   recipient: string;
   medalName: string;
-  citation: string;
+  citation?: string;
   campaignTag: string;
   date: string;
   status: string;
@@ -17,7 +17,7 @@ export default function MedalCard({ recipient, medalName, citation, campaignTag,
         </div>
         <span className="rounded border border-slateBlue/60 px-2 py-1 text-xs uppercase tracking-[0.3em] text-slate-300">{status}</span>
       </div>
-      <p className="mt-4 text-sm text-slate-300">{citation}</p>
+      {citation && <p className="mt-4 text-sm text-slate-300">{citation}</p>}
       <div className="mt-4 flex flex-wrap gap-3 text-sm text-slate-400">
         <span>{campaignTag}</span>
         <span>{date}</span>

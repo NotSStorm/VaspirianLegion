@@ -1,0 +1,161 @@
+================================================================================
+                      ANDOURAN EMPIRE - IMPERIAL CODEX
+                         HONORS, ORDERS & MEDALS
+================================================================================
+
+IMPERIAL ORDERS & HONORS
+------------------------
+• AHLGRIM'S CIRCLE
+  Andour's Medal of Honor, given for acts of great courage in the defense of the 
+  country. Only given by official members of the Imperial family of Andour.
+
+• IMPERIAL ORDER OF AHLGRIM
+  Awarded personally by the Emperor or Crown Prince of Andour for the achievements 
+  of only the most well esteemed and notable individuals in the history of the Empire.
+
+• ORDER OF THE ANDOURAN EMPIRE
+  Awarded by the Sovereignty of Andour to the most notable members of the Empire in 
+  commemoration of their efforts and contributions to the nation and their legions.
+  - Classes: Knight, Commander, Grand Cross
+
+• ORDER OF THE ARCHITECTS
+  Awarded to the most respective and highest contributing developers and artists 
+  of Andour. Only the most exceptional artists and the most committed developers 
+  of the nation are able to earn this.
+
+• ORDER OF THE CITADEL
+  Awarded to the most notable staff members of the Empire for outstanding 
+  performance, extreme loyalty, and unyielding commitment to Andour and its cause.
+  - Classes: Knight, Commander
+
+• ORDER OF THE GOLD GRIFFIN
+  Given for undying loyalty, combat expertise, and carrying oneself in a manner 
+  befitting of the values of Andour. To become a member of the Order of the Gold 
+  Griffin, one must be inducted as a squire under an existing knight.
+  - Ranks: Esquire, Knight, Baron, Earl, Duke, Prince
+
+
+SHIELDS
+-------
+• GOLD SHIELD (1st Class, 2nd Class, 3rd Class)
+  Given for high level command ability in leading multiple regiments and formations, 
+  this medal is only available to regimental commanders+, but is typically awarded 
+  to general staff. In order to receive an upgrade in class, one must lead a 
+  larger-scale formation (i.e. elevating from a brigade to a corps or fielding the army).
+
+• SILVER SHIELD (1st Class, 2nd Class, 3rd Class)
+  Given for tactical ability in leading groups of rankers and for outstanding 
+  leadership initiative, only applicable to capable commanders on the field of 
+  battle. In order to receive an upgrade in class, one must have objectively 
+  improved as a line commander and shall be reviewed and confirmed by the respective 
+  medal committee.
+
+• BRONZE SHIELD (1st Class, 2nd Class, 3rd Class)
+  Given for excellence in administration, training, and organization of a military 
+  formation, applicable to any staff member. In order to receive an upgrade in 
+  class, one must have done significantly more work for their respective regiment.
+
+
+REGIONAL AWARDS
+---------------
+• EMBODIMENT OF VASPIRIA
+  Awarded for consistent service, dedicated loyalty, exceptional valor, and 
+  steadfast integrity in service to Vaspira.
+
+
+CORPS MEDALS
+------------
+• GUARD KNIGHT COMMENDATION
+  Awarded to the most esteemed and notable commanders of the Guard, these individuals 
+  are closely associated with the success and legacy of the Guard. Truly only the 
+  absolute best earn this medal.
+
+• IMPERIAL GUARD CROSS (Bronze, Silver, Gold)
+  Reserved strictly for Guardsmen, this medal is awarded for displaying deep loyalty 
+  and dedication to the Guard as well as exemplary valor on the field of battle.
+
+• ORDER OF THE WHITE TIGER
+  Kaito's Medal of Honor, given for acts of great courage and dedication in the 
+  defense and in service of the dominion.
+
+• PROVINCIAL ARMY CROSS (Bronze, Silver, Gold)
+  Awarded only to members of the Provincial Army who show exemplary dedication, 
+  martial prowess, and valiant actions on and off the field of battle in service 
+  to their regiments and greater nation as a whole.
+
+
+REGIMENTAL AWARDS & ACCOLADES
+-----------------------------
+• PARAGON OF MIGHT & HONOR
+  Given out at each ceremony to commemorate the top members of the regiments. Only 
+  three people per regiment can be awarded this at a time. An extra medal can be 
+  awarded for every additional line a regiment rallies.
+
+• IMPERIAL MERIT
+  Awarded to long standing veterans of the army who remain consistently active and 
+  committed, recipients of this award are recognized as foundational pillars of 
+  their respective legions.
+
+• CROSS OF CONSUMMATE VALOR
+  A distinctive award earned through top fragging a victorious Andouran brigade-wide 
+  or larger battle. Awarded on the spot and re-announced at the next ceremony.
+
+• ARTISANS ACCOLADE
+  A precursor to the Order of the Architects, given out for generalized propaganda 
+  efforts for one's respective regiment or corps (clips, pictures, VODs, artwork).
+
+• SILVER ARCHITECT
+  Awarded for prominent architectural, design, and development contributions to the nation.
+
+• CANNONEERS CROSS
+  An exclusive commemoration awarded to members of artillery units within the Andouran 
+  Empire who have displayed immense dedication, valor, and skill operating batteries.
+
+• RECRUITMENT CROSS (1st Class, 2nd Class, 3rd Class)
+  Awarded to Andourans who’ve gone above and beyond to expand their ranks.
+  - 3rd Class: 15 recruits
+  - 2nd Class: 30 recruits
+  - 1st Class: 50 recruits
+
+• STAR OF SOLIDARITY
+  Awarded to those who do their part in keeping their community active, strong, and 
+  holding high morale.
+
+• COLOR GUARD COMMENDATION
+  Earned by those who give their all into consistently and successfully defending 
+  Andouran colors on the field.
+
+• VALOR IN DEATH (1st Class, 2nd Class, 3rd Class)
+  Given for exemplary combat skill and acts of heroism, typically reserved for 
+  regimental specialists.
+
+• HONORARY SERVICE (1st Class, 2nd Class, 3rd Class)
+  Dedicated to those who’ve shown immense dedication, loyalty, and activity to 
+  their regiments and nation.
+
+
+VENERATIONS
+-----------
+CAMPAIGN VENERATIONS:
+• 1st Prussian Campaign Veneration: Veterans of 1st Prussian Campaign of 2021.
+• Tokugawa Campaign Veneration: Veterans of Tokugawa Campaign of 2023.
+• Iberian Campaign Veneration: Veterans of Iberian Campaign of 2023.
+• American Campaign Veneration: Veterans of American Campaign of 2024.
+• Shetlands Campaign Veneration: Veterans of Shetlands Campaigns of 2025.
+
+SERVICE MILESTONE VENERATIONS (TIME IN SERVICE):
+• VEN 3:  3 Months Service
+• VEN 6:  6 Months Service
+• VEN 9:  9 Months Service
+• VEN 12: 12 Months (1 Year)
+• VEN 15: 15 Months Service
+• VEN 18: 18 Months Service
+• VEN 21: 21 Months Service
+• VEN 24: 24 Months (2 Years)
+• VEN 27: 27 Months Service
+• VEN 30: 30 Months Service
+• VEN 33: 33 Months Service
+• VEN 36: 36 Months (3 Years)
+• VEN 48: 48 Months (4 Years)
+• VEN 60: 60 Months (5 Years)
+================================================================================

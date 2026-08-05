@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import MedalCard from '../components/shared/MedalCard';
 import { getAuthenticatedState } from '../lib/auth';
+import { medalOptionsByCategory, MEDAL_OPTIONS } from '../lib/medals';
 import { supabase } from '../lib/supabase';
 
 type MedalRecord = {
   id: string;
   recipient_profile_id?: string | null;
   medal_name: string;
-  citation: string;
+  citation?: string;
   campaign_tag: string;
   date_awarded: string;
   status_tags: string[];
@@ -17,65 +18,24 @@ type MedalRecord = {
   } | null;
 };
 
-type MedalOption = {
-  category: string;
-  name: string;
-};
-
-const MEDAL_OPTIONS: MedalOption[] = [
-  { category: 'Imperial Orders', name: "AHLGRIM'S CIRCLE" },
-  { category: 'Imperial Orders', name: 'IMPERIAL ORDER OF AHLGRIM' },
-  { category: 'Imperial Orders', name: 'ORDER OF THE ANDOURAN EMPIRE' },
-  { category: 'Imperial Orders', name: 'ORDER OF THE ARCHITECTS' },
-  { category: 'Imperial Orders', name: 'ORDER OF THE CITADEL' },
-  { category: 'Imperial Orders', name: 'ORDER OF THE GOLD GRIFFIN' },
-  { category: 'Shields', name: 'GOLD SHIELD' },
-  { category: 'Shields', name: 'SILVER SHIELD' },
-  { category: 'Shields', name: 'BRONZE SHIELD' },
-  { category: 'Regional Awards', name: 'EMBODIMENT OF VASPIRIA' },
-  { category: 'Corps Medals', name: 'GUARD KNIGHT COMMENDATION' },
-  { category: 'Corps Medals', name: 'IMPERIAL GUARD CROSS' },
-  { category: 'Corps Medals', name: 'ORDER OF THE WHITE TIGER' },
-  { category: 'Corps Medals', name: 'PROVINCIAL ARMY CROSS' },
-  { category: 'Regimental Awards', name: 'PARAGON OF MIGHT & HONOR' },
-  { category: 'Regimental Awards', name: 'IMPERIAL MERIT' },
-  { category: 'Regimental Awards', name: 'CROSS OF CONSUMMATE VALOR' },
-  { category: 'Regimental Awards', name: 'ARTISANS ACCOLADE' },
-  { category: 'Regimental Awards', name: 'CANNONEERS CROSS' },
-  { category: 'Regimental Awards', name: 'RECRUITMENT CROSS' },
-  { category: 'Regimental Awards', name: 'STAR OF SOLIDARITY' },
-  { category: 'Regimental Awards', name: 'COLOR GUARD CROSS' },
-  { category: 'Regimental Awards', name: 'VALOR IN DEATH' },
-  { category: 'Regimental Awards', name: 'HONORARY SERVICE' },
-  { category: 'Venerations', name: '1ST PRUSSIAN CAMPAIGN VENERATION' },
-  { category: 'Venerations', name: 'TOKUGAWA CAMPAIGN VENERATION' },
-  { category: 'Venerations', name: 'IBERIAN CAMPAIGN VENERATION' },
-  { category: 'Venerations', name: 'AMERICAN CAMPAIGN VENERATION' },
-  { category: 'Venerations', name: 'SHETLANDS CAMPAIGN VENERATION' },
-  { category: 'Venerations', name: '4 YEAR VENERATION' },
-  { category: 'Venerations', name: '27-36 MONTH VENERATIONS' },
-  { category: 'Venerations', name: '15-24 MONTH VENERATIONS' },
-  { category: 'Venerations', name: '3-12 MONTH VENERATIONS' }
-];
-
 export default function MedalsPage() {
   const [medals, setMedals] = useState<MedalRecord[]>([]);
   const [profiles, setProfiles] = useState<Array<{ id: string; roblox_username?: string | null; discord_username?: string | null }>>([]);
   const [isStaff, setIsStaff] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [form, setForm] = useState({
-    recipientProfileId: '',
+    recipientProfileIds: [] as string[],
     medalName: '',
-    citation: '',
     dateAwarded: '',
     statusTags: 'Declassified'
   });
-
-  const medalOptionsByCategory = MEDAL_OPTIONS.reduce<Record<string, string[]>>((accumulator, option) => {
-    const existing = accumulator[option.category] || [];
-    accumulator[option.category] = [...existing, option.name];
-    return accumulator;
-  }, {});
+  const [inverseForm, setInverseForm] = useState({
+    recipientProfileId: '',
+    medalNames: [] as string[],
+    dateAwarded: '',
+    statusTags: 'Declassified'
+  });
 
   const loadMedals = async () => {
     setError(null);
@@ -109,6 +69,7 @@ export default function MedalsPage() {
 
   const addMedal = async () => {
     setError(null);
+    setSuccess(null);
     try {
       const selectedMedal = MEDAL_OPTIONS.find((option) => option.name === form.medalName) || null;
       if (!selectedMedal) {
@@ -116,20 +77,61 @@ export default function MedalsPage() {
         return;
       }
 
-      const { error: insertError } = await supabase.from('medals').insert({
-        recipient_profile_id: form.recipientProfileId || null,
+      if (form.recipientProfileIds.length === 0) {
+        setError('Select one or more recipients.');
+        return;
+      }
+
+      const selectedDate = String(form.dateAwarded || '').trim();
+      if (!selectedDate) {
+        setError('Provide a date awarded.');
+        return;
+      }
+
+      const uniqueRecipientIds = Array.from(new Set(form.recipientProfileIds));
+      const { data: existingMedals, error: existingMedalsError } = await supabase
+        .from('medals')
+        .select('recipient_profile_id, medal_name')
+        .eq('medal_name', form.medalName)
+        .in('recipient_profile_id', uniqueRecipientIds);
+
+      if (existingMedalsError) throw existingMedalsError;
+
+      const existingRecipientIds = new Set(
+        (existingMedals || [])
+          .map((medal) => String(medal.recipient_profile_id || '').trim())
+          .filter(Boolean)
+      );
+
+      const recipientsToInsert = uniqueRecipientIds.filter((profileId) => !existingRecipientIds.has(profileId));
+
+      if (recipientsToInsert.length === 0) {
+        setError('Skipped: every selected recipient already has this medal.');
+        return;
+      }
+
+      const insertRows = recipientsToInsert.map((profileId) => ({
+        recipient_profile_id: profileId,
         medal_name: form.medalName,
-        citation: form.citation,
+        citation: '',
         campaign_tag: selectedMedal.category,
-        date_awarded: form.dateAwarded,
+        date_awarded: selectedDate,
         status_tags: form.statusTags.split(',').map((value) => value.trim()).filter(Boolean)
-      });
+      }));
+
+      const { error: insertError } = await supabase.from('medals').insert(insertRows);
       if (insertError) throw insertError;
 
+      const skippedCount = uniqueRecipientIds.length - recipientsToInsert.length;
+      setSuccess(
+        skippedCount > 0
+          ? `Assigned ${insertRows.length} medal entries. Skipped ${skippedCount} duplicate recipient(s).`
+          : `Assigned ${insertRows.length} medal entries.`
+      );
+
       setForm({
-        recipientProfileId: '',
+        recipientProfileIds: [],
         medalName: '',
-        citation: '',
         dateAwarded: '',
         statusTags: 'Declassified'
       });
@@ -140,12 +142,95 @@ export default function MedalsPage() {
     }
   };
 
+  const addManyMedalsToRecipient = async () => {
+    setError(null);
+    setSuccess(null);
+    try {
+      const recipientProfileId = String(inverseForm.recipientProfileId || '').trim();
+      if (!recipientProfileId) {
+        setError('Select a recipient.');
+        return;
+      }
+
+      if (inverseForm.medalNames.length === 0) {
+        setError('Select one or more medals.');
+        return;
+      }
+
+      const selectedDate = String(inverseForm.dateAwarded || '').trim();
+      if (!selectedDate) {
+        setError('Provide a date awarded.');
+        return;
+      }
+
+      const statusTags = inverseForm.statusTags.split(',').map((value) => value.trim()).filter(Boolean);
+      const uniqueMedalNames = Array.from(new Set(inverseForm.medalNames));
+      const { data: existingMedals, error: existingMedalsError } = await supabase
+        .from('medals')
+        .select('medal_name')
+        .eq('recipient_profile_id', recipientProfileId)
+        .in('medal_name', uniqueMedalNames);
+
+      if (existingMedalsError) throw existingMedalsError;
+
+      const existingMedalNames = new Set(
+        (existingMedals || [])
+          .map((medal) => String(medal.medal_name || '').trim())
+          .filter(Boolean)
+      );
+
+      const medalNamesToInsert = uniqueMedalNames.filter((medalName) => !existingMedalNames.has(medalName));
+      if (medalNamesToInsert.length === 0) {
+        setError('Skipped: this recipient already has all selected medals.');
+        return;
+      }
+
+      const insertRows = medalNamesToInsert.map((medalName) => {
+        const medalOption = MEDAL_OPTIONS.find((option) => option.name === medalName) || null;
+        if (!medalOption) {
+          throw new Error(`Unrecognized medal: ${medalName}`);
+        }
+
+        return {
+          recipient_profile_id: recipientProfileId,
+          medal_name: medalName,
+          citation: '',
+          campaign_tag: medalOption.category,
+          date_awarded: selectedDate,
+          status_tags: statusTags
+        };
+      });
+
+      const { error: insertError } = await supabase.from('medals').insert(insertRows);
+      if (insertError) throw insertError;
+
+      const skippedCount = uniqueMedalNames.length - medalNamesToInsert.length;
+      setSuccess(
+        skippedCount > 0
+          ? `Assigned ${insertRows.length} medal entries. Skipped ${skippedCount} duplicate medal(s).`
+          : `Assigned ${insertRows.length} medal entries.`
+      );
+
+      setInverseForm({
+        recipientProfileId: '',
+        medalNames: [],
+        dateAwarded: '',
+        statusTags: 'Declassified'
+      });
+
+      await loadMedals();
+    } catch (saveErr) {
+      setError(saveErr instanceof Error ? saveErr.message : 'Unable to add medals.');
+    }
+  };
+
   return (
     <section className="space-y-6">
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
         <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Medals & Commendations</div>
         <h2 className="mt-2 text-3xl font-semibold uppercase tracking-[0.2em] text-silver">Honors</h2>
         {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
+        {success && <p className="mt-3 text-sm text-emerald-300">{success}</p>}
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         {medals.map((medal) => (
@@ -162,28 +247,79 @@ export default function MedalsPage() {
       </div>
 
       {isStaff && (
-        <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
-          <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">Add Medal</h3>
-          <div className="mt-4 grid gap-3">
-            <select value={form.recipientProfileId} onChange={(event) => setForm((prev) => ({ ...prev, recipientProfileId: event.target.value }))} className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver">
-              <option value="">Recipient</option>
-              {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>{profile.roblox_username || profile.discord_username || profile.id}</option>
-              ))}
-            </select>
-            <select value={form.medalName} onChange={(event) => setForm((prev) => ({ ...prev, medalName: event.target.value }))} className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver">
-              <option value="">Medal</option>
-              {Object.entries(medalOptionsByCategory).map(([category, medals]) => (
-                <optgroup key={category} label={category}>
-                  {medals.map((medal) => (
-                    <option key={medal} value={medal}>{medal}</option>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
+            <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">One Medal to Many</h3>
+            <div className="mt-4 grid gap-3">
+              <label className="text-xs text-slate-400">
+                Recipients
+                <select
+                  multiple
+                  value={form.recipientProfileIds}
+                  onChange={(event) => {
+                    const selectedProfileIds = Array.from(event.target.selectedOptions).map((option) => option.value);
+                    setForm((prev) => ({ ...prev, recipientProfileIds: selectedProfileIds }));
+                  }}
+                  className="mt-1 min-h-[12rem] w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
+                >
+                {profiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>{profile.roblox_username || profile.discord_username || profile.id}</option>
+                ))}
+                </select>
+              </label>
+              <p className="text-xs text-slate-500">Selected recipients: {form.recipientProfileIds.length}</p>
+              <select value={form.medalName} onChange={(event) => setForm((prev) => ({ ...prev, medalName: event.target.value }))} className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver">
+                <option value="">Medal</option>
+                {Object.entries(medalOptionsByCategory).map(([category, medals]) => (
+                  <optgroup key={category} label={category}>
+                    {medals.map((medal) => (
+                      <option key={medal} value={medal}>{medal}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <input value={form.dateAwarded} onChange={(event) => setForm((prev) => ({ ...prev, dateAwarded: event.target.value }))} placeholder="Date awarded (e.g. 2026-08-05)" className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+              <button type="button" onClick={() => void addMedal()} className="rounded border border-silver/50 bg-silver px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slateBlue">Assign Medal to Selected</button>
+            </div>
+          </div>
+
+          <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
+            <h3 className="text-lg font-semibold uppercase tracking-[0.3em] text-silver">Many Medals to One</h3>
+            <div className="mt-4 grid gap-3">
+              <select
+                value={inverseForm.recipientProfileId}
+                onChange={(event) => setInverseForm((prev) => ({ ...prev, recipientProfileId: event.target.value }))}
+                className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
+              >
+                <option value="">Recipient</option>
+                {profiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>{profile.roblox_username || profile.discord_username || profile.id}</option>
+                ))}
+              </select>
+              <label className="text-xs text-slate-400">
+                Medals
+                <select
+                  multiple
+                  value={inverseForm.medalNames}
+                  onChange={(event) => {
+                    const selectedMedals = Array.from(event.target.selectedOptions).map((option) => option.value);
+                    setInverseForm((prev) => ({ ...prev, medalNames: selectedMedals }));
+                  }}
+                  className="mt-1 min-h-[12rem] w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
+                >
+                  {Object.entries(medalOptionsByCategory).map(([category, medals]) => (
+                    <optgroup key={category} label={category}>
+                      {medals.map((medal) => (
+                        <option key={medal} value={medal}>{medal}</option>
+                      ))}
+                    </optgroup>
                   ))}
-                </optgroup>
-              ))}
-            </select>
-            <input value={form.dateAwarded} onChange={(event) => setForm((prev) => ({ ...prev, dateAwarded: event.target.value }))} placeholder="Date awarded" className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
-            <textarea value={form.citation} onChange={(event) => setForm((prev) => ({ ...prev, citation: event.target.value }))} placeholder="Citation" className="min-h-[100px] rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
-            <button type="button" onClick={() => void addMedal()} className="rounded border border-silver/50 bg-silver px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slateBlue">Save Medal</button>
+                </select>
+              </label>
+              <p className="text-xs text-slate-500">Selected medals: {inverseForm.medalNames.length}</p>
+              <input value={inverseForm.dateAwarded} onChange={(event) => setInverseForm((prev) => ({ ...prev, dateAwarded: event.target.value }))} placeholder="Date awarded (e.g. 2026-08-05)" className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" />
+              <button type="button" onClick={() => void addManyMedalsToRecipient()} className="rounded border border-silver/50 bg-silver px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slateBlue">Assign Selected Medals</button>
+            </div>
           </div>
         </div>
       )}
