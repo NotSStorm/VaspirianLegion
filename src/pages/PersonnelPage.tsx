@@ -779,8 +779,13 @@ export default function PersonnelPage() {
             <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Personnel Ledger</div>
             <h2 className="mt-2 text-3xl font-semibold uppercase tracking-[0.2em] text-silver">Roster</h2>
           </div>
-          <div className="flex flex-col gap-3 sm:min-w-[20rem] sm:flex-row sm:items-center">
-            <input value={query} onChange={(e) => setQuery(e.target.value)} className="rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver" placeholder="Search by username or rank" />
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="w-full min-w-0 flex-1 rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
+              placeholder="Search by username or rank"
+            />
             {isStaff && (
               <button
                 type="button"

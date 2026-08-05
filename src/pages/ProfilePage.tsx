@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Shield } from 'lucide-react';
 import { getAuthenticatedState } from '../lib/auth';
+import { MEDAL_OPTIONS } from '../lib/medals';
 import { supabase } from '../lib/supabase';
 
 const GROUP_ID = '5531725';
@@ -105,6 +106,11 @@ export default function ProfilePage() {
   const [battlesById, setBattlesById] = useState<Map<string, Battle>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [medalRequestSearch, setMedalRequestSearch] = useState('');
+  const [selectedRequestedMedal, setSelectedRequestedMedal] = useState('');
+  const [medalRequestNote, setMedalRequestNote] = useState('');
+  const [submittingMedalRequest, setSubmittingMedalRequest] = useState(false);
+  const [medalRequestMessage, setMedalRequestMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -283,6 +289,58 @@ export default function ProfilePage() {
     ];
   }, [logs, battlesById]);
 
+  const filteredMedalRequestOptions = useMemo(() => {
+    const query = medalRequestSearch.trim().toLowerCase();
+    if (!query) {
+      return MEDAL_OPTIONS.slice(0, 12);
+    }
+
+    return MEDAL_OPTIONS
+      .filter((option) => [option.name, option.category].join(' ').toLowerCase().includes(query))
+      .slice(0, 20);
+  }, [medalRequestSearch]);
+
+  const submitMedalRequest = async () => {
+    setMedalRequestMessage(null);
+
+    try {
+      if (!selectedRequestedMedal) {
+        setMedalRequestMessage('Select a medal to request.');
+        return;
+      }
+
+      const { profile: authProfile } = await getAuthenticatedState();
+      if (!authProfile?.id) {
+        setMedalRequestMessage('You must be signed in to submit a medal request.');
+        return;
+      }
+
+      setSubmittingMedalRequest(true);
+
+      const { error: insertError } = await supabase
+        .from('medal_requests')
+        .insert({
+          requester_profile_id: authProfile.id,
+          medal_name: selectedRequestedMedal,
+          request_note: String(medalRequestNote || '').trim() || null,
+          status: 'pending'
+        });
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      setSelectedRequestedMedal('');
+      setMedalRequestNote('');
+      setMedalRequestSearch('');
+      setMedalRequestMessage('Medal request submitted for admin review.');
+    } catch (requestError) {
+      setMedalRequestMessage(requestError instanceof Error ? requestError.message : 'Unable to submit medal request.');
+    } finally {
+      setSubmittingMedalRequest(false);
+    }
+  };
+
   return (
     <section className="space-y-6">
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
@@ -371,6 +429,53 @@ export default function ProfilePage() {
                 <div className="mt-1 text-xs uppercase tracking-[0.3em] text-slate-400">{stat.date}</div>
               </div>
             ))}
+          </div>
+
+          <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
+            <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Request Medal</div>
+            <h3 className="mt-2 text-lg font-semibold uppercase tracking-[0.2em] text-silver">Submit Medal Review Request</h3>
+            <p className="mt-2 text-sm text-slate-300">If you are missing a medal, submit a request and admin staff will review it.</p>
+
+            <div className="mt-4 grid gap-3">
+              <label className="text-xs text-slate-400">
+                Search Medal
+                <input
+                  value={medalRequestSearch}
+                  onChange={(event) => setMedalRequestSearch(event.target.value)}
+                  placeholder="Search medal or category"
+                  className="mt-1 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
+                />
+              </label>
+              <div className="max-h-56 overflow-auto rounded border border-slateBlue/60 bg-[#0d121b] p-2">
+                {filteredMedalRequestOptions.map((option) => (
+                  <button
+                    key={`request:${option.name}`}
+                    type="button"
+                    onClick={() => setSelectedRequestedMedal(option.name)}
+                    className={`mb-1 block w-full rounded px-2 py-1 text-left text-sm ${selectedRequestedMedal === option.name ? 'bg-slateBlue/30 text-silver' : 'text-slate-300 hover:bg-slateBlue/20'}`}
+                  >
+                    {option.name}
+                    <span className="ml-2 text-[10px] uppercase tracking-[0.2em] text-slate-500">{option.category}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="text-xs text-slate-400">Selected medal: {selectedRequestedMedal || 'None'}</div>
+              <textarea
+                value={medalRequestNote}
+                onChange={(event) => setMedalRequestNote(event.target.value)}
+                placeholder="Optional note (battle date, evidence, context)"
+                className="min-h-[100px] rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-sm text-silver"
+              />
+              <button
+                type="button"
+                onClick={() => void submitMedalRequest()}
+                disabled={submittingMedalRequest}
+                className="rounded border border-silver/50 bg-silver px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] text-slateBlue disabled:opacity-60"
+              >
+                {submittingMedalRequest ? 'Submitting...' : 'Submit Medal Request'}
+              </button>
+              {medalRequestMessage && <p className="text-sm text-slate-300">{medalRequestMessage}</p>}
+            </div>
           </div>
         </>
       )}

@@ -122,6 +122,14 @@ function App() {
           )}
         />
         <Route
+          path="/admin/:section"
+          element={(
+            <ProtectedRoute requireRoblox requireStaff>
+              <AdminPage />
+            </ProtectedRoute>
+          )}
+        />
+        <Route
           path="/profile"
           element={(
             <ProtectedRoute>
