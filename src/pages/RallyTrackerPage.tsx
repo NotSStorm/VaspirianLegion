@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { isInTimeWindow, type TimeWindow } from '../lib/timeWindows';
 
@@ -48,65 +48,66 @@ export default function RallyTrackerPage() {
   const [points, setPoints] = useState<TrendPoint[]>([]);
   const [hoverPoint, setHoverPoint] = useState<HoverPoint | null>(null);
 
-  useEffect(() => {
-    const load = async () => {
-      const [{ data: battles }, { data: logs }] = await Promise.all([
-        supabase.from('battles').select('id, name, start_date').order('start_date', { ascending: true }),
-        supabase.from('battle_stat_logs').select('battle_id, participant_name, unit, kills, deaths, assists, created_at')
-      ]);
+  const load = useCallback(async () => {
+    const [{ data: battles }, { data: logs }] = await Promise.all([
+      supabase.from('battles').select('id, name, start_date').order('start_date', { ascending: true }),
+      supabase.from('battle_stat_logs').select('battle_id, participant_name, unit, kills, deaths, assists, created_at')
+    ]);
 
-      const now = new Date();
+    const now = new Date();
 
-      const battleMap = new Map<string, Battle>();
-      ((battles || []) as Battle[]).forEach((battle) => {
-        battleMap.set(battle.id, battle);
+    const battleMap = new Map<string, Battle>();
+    ((battles || []) as Battle[]).forEach((battle) => {
+      battleMap.set(battle.id, battle);
+    });
+
+    const resolveDate = (entry: StatLog) => {
+      const battle = battleMap.get(entry.battle_id);
+      const battleDate = battle ? new Date(battle.start_date) : null;
+      if (battleDate && !Number.isNaN(battleDate.getTime())) {
+        return battleDate;
+      }
+
+      const createdAt = new Date(entry.created_at);
+      if (!Number.isNaN(createdAt.getTime())) {
+        return createdAt;
+      }
+
+      return null;
+    };
+
+    const buildPoints = (selectedPeriod: TimeWindow) => {
+      const grouped = new Map<string, { melrose: Set<string>; pirkland: Set<string>; total: Set<string> }>();
+      ((logs || []) as StatLog[]).forEach((entry) => {
+        const date = resolveDate(entry);
+        if (!date || !isInTimeWindow(date, selectedPeriod, now)) return;
+
+        const key = date.toISOString().slice(0, 10);
+        const existing = grouped.get(key) || { melrose: new Set<string>(), pirkland: new Set<string>(), total: new Set<string>() };
+        const name = entry.participant_name.trim();
+        if (!name) return;
+
+        existing.total.add(name);
+        const bucket = unitBucket(entry.unit || '');
+        if (bucket === 'melrose') existing.melrose.add(name);
+        if (bucket === 'pirkland') existing.pirkland.add(name);
+        grouped.set(key, existing);
       });
 
-      const resolveDate = (entry: StatLog) => {
-        const battle = battleMap.get(entry.battle_id);
-        const battleDate = battle ? new Date(battle.start_date) : null;
-        if (battleDate && !Number.isNaN(battleDate.getTime())) {
-          return battleDate;
-        }
-
-        const createdAt = new Date(entry.created_at);
-        if (!Number.isNaN(createdAt.getTime())) {
-          return createdAt;
-        }
-
-        return null;
-      };
-
-      const buildPoints = (selectedPeriod: TimeWindow) => {
-        const grouped = new Map<string, { melrose: Set<string>; pirkland: Set<string>; total: Set<string> }>();
-        ((logs || []) as StatLog[]).forEach((entry) => {
-          const date = resolveDate(entry);
-          if (!date || !isInTimeWindow(date, selectedPeriod, now)) return;
-
-          const key = date.toISOString().slice(0, 10);
-          const existing = grouped.get(key) || { melrose: new Set<string>(), pirkland: new Set<string>(), total: new Set<string>() };
-          const name = entry.participant_name.trim();
-          if (!name) return;
-
-          existing.total.add(name);
-          const bucket = unitBucket(entry.unit || '');
-          if (bucket === 'melrose') existing.melrose.add(name);
-          if (bucket === 'pirkland') existing.pirkland.add(name);
-          grouped.set(key, existing);
-        });
-
-        return Array.from(grouped.entries())
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([date, value]) => ({
-            date,
-            melrose: value.melrose.size,
-            pirkland: value.pirkland.size,
-            total: value.total.size
-          }));
-      };
-
-      setPoints(buildPoints(period));
+      return Array.from(grouped.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, value]) => ({
+          date,
+          melrose: value.melrose.size,
+          pirkland: value.pirkland.size,
+          total: value.total.size
+        }));
     };
+
+    setPoints(buildPoints(period));
+  }, [period]);
+
+  useEffect(() => {
 
     void load();
 
@@ -128,7 +129,7 @@ export default function RallyTrackerPage() {
       window.clearInterval(pollId);
       void supabase.removeChannel(channel);
     };
-  }, [period]);
+  }, [load]);
 
   const parsedPoints = useMemo(
     () => points.map((point) => ({ ...point, parsedDate: new Date(`${point.date}T00:00:00Z`) })),
@@ -436,6 +437,16 @@ export default function RallyTrackerPage() {
             </div>
           </>
         )}
+      </div>
+
+      <div className="rounded border border-slateBlue/70 bg-[#141a24] p-4">
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="w-full rounded border border-slateBlue/60 px-3 py-2 text-xs uppercase tracking-[0.3em] text-slate-200 hover:bg-slateBlue/20"
+        >
+          Reload battle logs
+        </button>
       </div>
     </section>
   );

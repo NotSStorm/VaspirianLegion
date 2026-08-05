@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { isInTimeWindow, type TimeWindow } from '../lib/timeWindows';
 
@@ -54,6 +54,25 @@ export default function LeaderboardPage() {
   const [battleDates, setBattleDates] = useState<Map<string, Date>>(new Map());
   const [metric, setMetric] = useState<Metric>('kills');
 
+  const load = useCallback(async () => {
+    const [{ data: statData }, { data: battleData }] = await Promise.all([
+      supabase
+        .from('battle_stat_logs')
+        .select('id, battle_id, participant_name, unit, kills, deaths, assists, created_at'),
+      supabase.from('battles').select('id, start_date')
+    ]);
+
+    setLogs((statData || []) as StatLog[]);
+    const dateMap = new Map<string, Date>();
+    ((battleData || []) as Battle[]).forEach((battle) => {
+      const parsed = new Date(battle.start_date);
+      if (!Number.isNaN(parsed.getTime())) {
+        dateMap.set(battle.id, parsed);
+      }
+    });
+    setBattleDates(dateMap);
+  }, []);
+
   const resolveLogDate = (log: StatLog) => {
     const battleDate = battleDates.get(log.battle_id);
     if (battleDate && !Number.isNaN(battleDate.getTime())) {
@@ -69,25 +88,6 @@ export default function LeaderboardPage() {
   };
 
   useEffect(() => {
-    const load = async () => {
-      const [{ data: statData }, { data: battleData }] = await Promise.all([
-        supabase
-          .from('battle_stat_logs')
-          .select('id, battle_id, participant_name, unit, kills, deaths, assists, created_at'),
-        supabase.from('battles').select('id, start_date')
-      ]);
-
-      setLogs((statData || []) as StatLog[]);
-      const dateMap = new Map<string, Date>();
-      ((battleData || []) as Battle[]).forEach((battle) => {
-        const parsed = new Date(battle.start_date);
-        if (!Number.isNaN(parsed.getTime())) {
-          dateMap.set(battle.id, parsed);
-        }
-      });
-      setBattleDates(dateMap);
-    };
-
     void load();
 
     const channel = supabase
@@ -108,7 +108,7 @@ export default function LeaderboardPage() {
       window.clearInterval(pollId);
       void supabase.removeChannel(channel);
     };
-  }, []);
+  }, [load]);
 
   const aggregateByWindow = (selectedWindow: TimeWindow) => {
     const now = new Date();
@@ -303,6 +303,16 @@ export default function LeaderboardPage() {
         {metric === 'high-scores'
           ? (['kills', 'deaths', 'assists'] as HighScoreMetric[]).map((selectedMetric) => renderHighScoreColumn(selectedMetric))
           : windowOrder.map((window) => renderWindowColumn(window))}
+      </div>
+
+      <div className="rounded border border-slateBlue/70 bg-[#141a24] p-4">
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="w-full rounded border border-slateBlue/60 px-3 py-2 text-xs uppercase tracking-[0.3em] text-slate-200 hover:bg-slateBlue/20"
+        >
+          Reload battle logs
+        </button>
       </div>
     </section>
   );
