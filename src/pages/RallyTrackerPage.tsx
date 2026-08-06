@@ -1,14 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { isInTimeWindow, type TimeWindow } from '../lib/timeWindows';
 
-type Battle = {
-  id: string;
-  name: string;
-  start_date: string;
-};
-
 type StatLog = {
+  id: string;
   battle_id: string;
   participant_name: string;
   unit: string;
@@ -16,6 +11,11 @@ type StatLog = {
   deaths: number;
   assists: number;
   created_at: string;
+  battles?: {
+    start_date: string;
+  } | Array<{
+    start_date: string;
+  }> | null;
 };
 
 type TrendPoint = {
@@ -47,44 +47,47 @@ export default function RallyTrackerPage() {
   const [view, setView] = useState<RallyView>('total');
   const [points, setPoints] = useState<TrendPoint[]>([]);
   const [hoverPoint, setHoverPoint] = useState<HoverPoint | null>(null);
+  const warnedMissingBattleDateRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
-    const [{ data: battles }, { data: logs }] = await Promise.all([
-      supabase.from('battles').select('id, name, start_date').order('start_date', { ascending: true }),
-      supabase.from('battle_stat_logs').select('battle_id, participant_name, unit, kills, deaths, assists, created_at')
-    ]);
+    const { data: logs } = await supabase
+      .from('battle_stat_logs')
+      .select('id, battle_id, participant_name, unit, kills, deaths, assists, created_at, battles(start_date)');
 
     const now = new Date();
 
-    const battleMap = new Map<string, Battle>();
-    ((battles || []) as Battle[]).forEach((battle) => {
-      battleMap.set(battle.id, battle);
-    });
-
-    const resolveDate = (entry: StatLog) => {
-      // Prefer the log creation timestamp so weekly/monthly windows reflect
-      // when attendance logs were actually recorded.
-      const createdAt = new Date(entry.created_at);
-      if (!Number.isNaN(createdAt.getTime())) {
-        return createdAt;
+    const parseBattleDate = (entry: StatLog) => {
+      const relation = Array.isArray(entry.battles) ? entry.battles[0] : entry.battles;
+      const startDate = relation?.start_date;
+      if (!startDate) {
+        return null;
       }
 
-      const battle = battleMap.get(entry.battle_id);
-      const battleDate = battle ? new Date(battle.start_date) : null;
-      if (battleDate && !Number.isNaN(battleDate.getTime())) {
-        return battleDate;
-      }
-
-      return null;
+      const parsed = new Date(startDate);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
     };
 
     const buildPoints = (selectedPeriod: TimeWindow) => {
       const grouped = new Map<string, { melrose: Set<string>; pirkland: Set<string>; total: Set<string> }>();
       ((logs || []) as StatLog[]).forEach((entry) => {
-        const date = resolveDate(entry);
-        if (!date || !isInTimeWindow(date, selectedPeriod, now)) return;
+        const battleDate = parseBattleDate(entry);
+        if (!battleDate) {
+          const warnKey = `${entry.id}:${entry.battle_id}`;
+          if (!warnedMissingBattleDateRef.current.has(warnKey)) {
+            warnedMissingBattleDateRef.current.add(warnKey);
+            console.warn('Missing or invalid battles.start_date for rally entry; skipping from rally window calculations', {
+              logId: entry.id,
+              battleId: entry.battle_id
+            });
+          }
+          return;
+        }
 
-        const key = date.toISOString().slice(0, 10);
+        if (!isInTimeWindow(battleDate, selectedPeriod, now)) return;
+
+        const relation = Array.isArray(entry.battles) ? entry.battles[0] : entry.battles;
+        const key = relation?.start_date || battleDate.toISOString().slice(0, 10);
+
         const existing = grouped.get(key) || { melrose: new Set<string>(), pirkland: new Set<string>(), total: new Set<string>() };
         const name = entry.participant_name.trim();
         if (!name) return;
@@ -441,15 +444,6 @@ export default function RallyTrackerPage() {
         )}
       </div>
 
-      <div className="rounded border border-slateBlue/70 bg-[#141a24] p-4">
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="w-full rounded border border-slateBlue/60 px-3 py-2 text-xs uppercase tracking-[0.3em] text-slate-200 hover:bg-slateBlue/20"
-        >
-          Reload battle logs
-        </button>
-      </div>
     </section>
   );
 }

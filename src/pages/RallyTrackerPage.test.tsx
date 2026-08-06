@@ -23,19 +23,9 @@ describe('RallyTrackerPage', () => {
     });
 
     fromMock.mockImplementation((table: string) => {
-      if (table === 'battles') {
-        return {
-          select: vi.fn(() => ({
-            order: vi.fn().mockResolvedValue({ data: [], error: null })
-          }))
-        };
-      }
-
       if (table === 'battle_stat_logs') {
         return {
-          select: vi.fn(() => ({
-            order: vi.fn().mockResolvedValue({ data: [], error: null })
-          }))
+          select: vi.fn().mockResolvedValue({ data: [], error: null })
         };
       }
 
@@ -45,9 +35,62 @@ describe('RallyTrackerPage', () => {
     });
   });
 
-  it('shows a reload button at the bottom of the page', async () => {
+  it('uses a sliding 7-day weekly window based on battle start_date', async () => {
+    const recentDate = new Date();
+    recentDate.setUTCDate(recentDate.getUTCDate() - 1);
+    const oldDate = new Date();
+    oldDate.setUTCDate(oldDate.getUTCDate() - 10);
+
+    const recentIso = recentDate.toISOString();
+    const oldIso = oldDate.toISOString();
+    const recentDay = recentIso.slice(0, 10);
+    const oldDay = oldIso.slice(0, 10);
+
+    fromMock.mockImplementation((table: string) => {
+      if (table === 'battle_stat_logs') {
+        return {
+          select: vi.fn().mockResolvedValue({
+            data: [
+              {
+                id: 'log-recent',
+                battle_id: 'battle-recent',
+                participant_name: 'Alpha',
+                unit: '87th Melrose',
+                kills: 1,
+                deaths: 0,
+                assists: 2,
+                created_at: oldIso,
+                battles: {
+                  start_date: recentDay
+                }
+              },
+              {
+                id: 'log-old',
+                battle_id: 'battle-old',
+                participant_name: 'Bravo',
+                unit: '82nd Pirkland',
+                kills: 2,
+                deaths: 1,
+                assists: 0,
+                created_at: recentIso,
+                battles: {
+                  start_date: oldDay
+                }
+              }
+            ],
+            error: null
+          })
+        };
+      }
+
+      return {
+        select: vi.fn().mockResolvedValue({ data: [], error: null })
+      };
+    });
+
     render(<RallyTrackerPage />);
 
-    expect(await screen.findByRole('button', { name: /reload battle logs/i })).toBeInTheDocument();
+    expect(await screen.findByText(recentDay)).toBeInTheDocument();
+    expect(screen.queryByText(oldDay)).not.toBeInTheDocument();
   });
 });

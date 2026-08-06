@@ -35,21 +35,10 @@ describe('LeaderboardPage', () => {
                 kills: 18,
                 deaths: 2,
                 assists: 4,
-                created_at: '2026-08-05T12:00:00Z'
-              }
-            ],
-            error: null
-          })
-        };
-      }
-
-      if (table === 'battles') {
-        return {
-          select: vi.fn().mockResolvedValue({
-            data: [
-              {
-                id: 'battle-1',
-                start_date: '2026-08-05'
+                created_at: '2026-07-19T12:00:00Z',
+                battles: {
+                  start_date: '2026-08-05'
+                }
               }
             ],
             error: null

@@ -1,11 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { isInTimeWindow, type TimeWindow } from '../lib/timeWindows';
-
-type Battle = {
-  id: string;
-  start_date: string;
-};
 
 type StatLog = {
   id: string;
@@ -16,6 +11,11 @@ type StatLog = {
   deaths: number;
   assists: number;
   created_at: string;
+  battles?: {
+    start_date: string;
+  } | Array<{
+    start_date: string;
+  }> | null;
 };
 
 type LeaderEntry = {
@@ -51,43 +51,50 @@ const metricLabels: Record<Metric, string> = {
 
 export default function LeaderboardPage() {
   const [logs, setLogs] = useState<StatLog[]>([]);
-  const [battleDates, setBattleDates] = useState<Map<string, Date>>(new Map());
   const [metric, setMetric] = useState<Metric>('kills');
+  const warnedMissingBattleDateRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
-    const [{ data: statData }, { data: battleData }] = await Promise.all([
-      supabase
-        .from('battle_stat_logs')
-        .select('id, battle_id, participant_name, unit, kills, deaths, assists, created_at'),
-      supabase.from('battles').select('id, start_date')
-    ]);
+    const { data: statData } = await supabase
+      .from('battle_stat_logs')
+      .select('id, battle_id, participant_name, unit, kills, deaths, assists, created_at, battles(start_date)');
 
     setLogs((statData || []) as StatLog[]);
-    const dateMap = new Map<string, Date>();
-    ((battleData || []) as Battle[]).forEach((battle) => {
-      const parsed = new Date(battle.start_date);
-      if (!Number.isNaN(parsed.getTime())) {
-        dateMap.set(battle.id, parsed);
-      }
-    });
-    setBattleDates(dateMap);
   }, []);
 
-  const resolveLogDate = (log: StatLog) => {
-    // Prefer the log creation timestamp so weekly/monthly windows reflect
-    // when stats were actually recorded.
-    const createdAt = new Date(log.created_at);
-    if (!Number.isNaN(createdAt.getTime())) {
-      return createdAt;
+  const parseBattleDate = (log: StatLog): Date | null => {
+    const relation = Array.isArray(log.battles) ? log.battles[0] : log.battles;
+    const startDate = relation?.start_date;
+    if (!startDate) {
+      return null;
     }
 
-    const battleDate = battleDates.get(log.battle_id);
-    if (battleDate && !Number.isNaN(battleDate.getTime())) {
+    const parsed = new Date(startDate);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  };
+
+  const resolveLogDisplayDate = (log: StatLog) => {
+    const battleDate = parseBattleDate(log);
+    if (battleDate) {
       return battleDate;
+    }
+
+    const createdAt = new Date(log.created_at);
+    if (!Number.isNaN(createdAt.getTime())) {
+      if (!warnedMissingBattleDateRef.current.has(log.id)) {
+        warnedMissingBattleDateRef.current.add(log.id);
+        console.warn('Missing or invalid battles.start_date for battle stat log; falling back to created_at', {
+          logId: log.id,
+          battleId: log.battle_id
+        });
+      }
+      return createdAt;
     }
 
     return null;
   };
+
+  const resolveLogWindowDate = (log: StatLog) => parseBattleDate(log);
 
   useEffect(() => {
     void load();
@@ -116,7 +123,7 @@ export default function LeaderboardPage() {
     const now = new Date();
     const map = new Map<string, LeaderEntry & { battleIds: Set<string> }>();
     logs.forEach((log) => {
-      const date = resolveLogDate(log);
+      const date = resolveLogWindowDate(log);
       if (!date || !isInTimeWindow(date, selectedWindow, now)) {
         return;
       }
@@ -150,7 +157,7 @@ export default function LeaderboardPage() {
     weekly: aggregateByWindow('weekly'),
     monthly: aggregateByWindow('monthly'),
     'all-time': aggregateByWindow('all-time')
-  }), [logs, battleDates]);
+  }), [logs]);
 
   const rankBoard = (entries: LeaderEntry[], metric: CumulativeMetric) => (
     [...entries]
@@ -248,7 +255,7 @@ export default function LeaderboardPage() {
         kills: Number(log.kills) || 0,
         deaths: Number(log.deaths) || 0,
         assists: Number(log.assists) || 0,
-        date: resolveLogDate(log)?.toISOString().slice(0, 10) || 'N/A'
+        date: resolveLogDisplayDate(log)?.toISOString().slice(0, 10) || 'N/A'
       })),
       selectedMetric
     );
@@ -305,16 +312,6 @@ export default function LeaderboardPage() {
         {metric === 'high-scores'
           ? (['kills', 'deaths', 'assists'] as HighScoreMetric[]).map((selectedMetric) => renderHighScoreColumn(selectedMetric))
           : windowOrder.map((window) => renderWindowColumn(window))}
-      </div>
-
-      <div className="rounded border border-slateBlue/70 bg-[#141a24] p-4">
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="w-full rounded border border-slateBlue/60 px-3 py-2 text-xs uppercase tracking-[0.3em] text-slate-200 hover:bg-slateBlue/20"
-        >
-          Reload battle logs
-        </button>
       </div>
     </section>
   );
