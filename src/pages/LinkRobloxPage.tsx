@@ -1,13 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import LegionCrest from '../components/shared/LegionCrest';
 import { supabase } from '../lib/supabase';
 import { getAuthenticatedState, resolvePostAuthPath } from '../lib/auth';
 import { syncProfileRankFromRoblox } from '../lib/robloxRanks';
 
-function randomCode() {
-  return `LEGION-${Math.floor(Math.random() * 0x1000000).toString(16).toUpperCase()}`;
-}
+const OAUTH_STATE_SESSION_KEY = 'roblox_oauth_state';
 
 function errorMessage(error: unknown, fallback: string) {
   if (error instanceof Error) {
@@ -23,12 +21,49 @@ function errorMessage(error: unknown, fallback: string) {
 
 export default function LinkRobloxPage() {
   const navigate = useNavigate();
-  const [username, setUsername] = useState('');
-  const [verificationCode, setVerificationCode] = useState<string | null>(null);
-  const [generatingCode, setGeneratingCode] = useState(false);
-  const [confirmingCode, setConfirmingCode] = useState(false);
+  const callbackHandledRef = useRef(false);
+  const [linkedUsername, setLinkedUsername] = useState<string | null>(null);
+  const [startingOauth, setStartingOauth] = useState(false);
+  const [processingCallback, setProcessingCallback] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const generateOAuthState = () => {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
+  };
+
+  const startOauthRedirect = async () => {
+    setError(null);
+    setSuccess(null);
+    setStartingOauth(true);
+
+    try {
+      const state = generateOAuthState();
+      sessionStorage.setItem(OAUTH_STATE_SESSION_KEY, state);
+
+      const redirectUri = `${window.location.origin}/link-roblox`;
+      const response = await fetch('/api/roblox/oauth/authorize-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          state,
+          redirectUri
+        })
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.authorizeUrl) {
+        throw new Error(payload?.message || 'Unable to start Roblox OAuth right now.');
+      }
+
+      window.location.assign(String(payload.authorizeUrl));
+    } catch (startError) {
+      setError(errorMessage(startError, 'Unable to start Roblox OAuth right now.'));
+      setStartingOauth(false);
+    }
+  };
 
   useEffect(() => {
     let active = true;
@@ -40,11 +75,7 @@ export default function LinkRobloxPage() {
       }
 
       if (profile.roblox_username) {
-        setUsername(profile.roblox_username);
-      }
-
-      if (profile.roblox_verification_code) {
-        setVerificationCode(profile.roblox_verification_code);
+        setLinkedUsername(profile.roblox_username);
       }
     };
 
@@ -55,137 +86,107 @@ export default function LinkRobloxPage() {
     };
   }, []);
 
-  const handleGenerate = async () => {
-    setError(null);
-    setSuccess(null);
-    setGeneratingCode(true);
-
-    try {
-      const trimmedUsername = username.trim();
-      if (!trimmedUsername) {
-        setError('Enter your Roblox username before requesting a code.');
-        return;
-      }
-
-      setUsername(trimmedUsername);
-
-      const { session } = await getAuthenticatedState();
-      if (!session?.user) {
-        navigate('/login', { replace: true });
-        return;
-      }
-
-      const response = await fetch('/api/roblox/verify-username', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: trimmedUsername })
-      });
-
-      const payload = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(payload?.message || 'Unable to validate that Roblox username right now.');
-      }
-
-      if (!payload?.verified) {
-        throw new Error(payload?.message || 'That Roblox username could not be validated.');
-      }
-
-      const nextCode = randomCode();
-      const { error: profileError } = await supabase.from('profiles').update({
-        roblox_verification_code: nextCode,
-        roblox_username: trimmedUsername
-      }).eq('id', session.user.id);
-
-      if (profileError) {
-        throw profileError;
-      }
-
-      setVerificationCode(nextCode);
-      setSuccess('A fresh verification code has been saved to your profile.');
-    } catch (err) {
-      console.error('Roblox verification code generation failed', err);
-      setError(errorMessage(err, 'Unable to generate a verification code.'));
-    } finally {
-      setGeneratingCode(false);
+  useEffect(() => {
+    if (callbackHandledRef.current) {
+      return;
     }
-  };
 
-  const handleConfirm = async () => {
-    setError(null);
-    setSuccess(null);
-    setConfirmingCode(true);
+    const params = new URLSearchParams(window.location.search);
+    const code = String(params.get('code') || '').trim();
+    const state = String(params.get('state') || '').trim();
+    const oauthError = String(params.get('error') || '').trim();
 
-    try {
-      const { session, profile } = await getAuthenticatedState();
-      if (!session?.user) {
-        navigate('/login', { replace: true });
-        return;
-      }
+    if (!code && !oauthError) {
+      return;
+    }
 
-      const trimmedUsername = username.trim();
-      const resolvedVerificationCode = profile?.roblox_verification_code || verificationCode;
-      if (!trimmedUsername || !resolvedVerificationCode) {
-        setError('Generate a code first and confirm your Roblox username.');
-        return;
-      }
+    callbackHandledRef.current = true;
 
-      const response = await fetch('/api/roblox/verify-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: trimmedUsername, code: resolvedVerificationCode })
-      });
+    if (oauthError) {
+      setError('Roblox OAuth was cancelled or denied. Please try again.');
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return;
+    }
 
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload?.verified) {
-        throw new Error(payload?.message || 'Code not found on your profile — make sure you saved it and try again');
-      }
-
-      const { error: profileError } = await supabase.from('profiles').update({
-        roblox_id: payload.robloxId,
-        roblox_username: trimmedUsername,
-        roblox_verified_at: new Date().toISOString(),
-        roblox_verification_code: resolvedVerificationCode
-      }).eq('id', session.user.id);
-
-      if (profileError) {
-        throw profileError;
-      }
+    const runCallback = async () => {
+      setProcessingCallback(true);
+      setError(null);
+      setSuccess(null);
 
       try {
-        await syncProfileRankFromRoblox({
-          profileId: session.user.id,
-          robloxId: payload.robloxId ? String(payload.robloxId) : null,
-          robloxUsername: trimmedUsername
+        const expectedState = String(sessionStorage.getItem(OAUTH_STATE_SESSION_KEY) || '').trim();
+        if (!expectedState || !state || expectedState !== state) {
+          throw new Error('OAuth state validation failed. Please try again.');
+        }
+
+        const response = await fetch('/api/roblox/oauth/callback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code,
+            state,
+            redirectUri: `${window.location.origin}/link-roblox`
+          })
         });
-      } catch (rankSyncError) {
-        console.warn('Roblox rank auto-sync failed after account linking', rankSyncError);
+
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload?.verified) {
+          throw new Error(payload?.message || 'Roblox OAuth callback failed. Please try again.');
+        }
+
+        const { session } = await getAuthenticatedState();
+        if (!session?.user) {
+          navigate('/login', { replace: true });
+          return;
+        }
+
+        const robloxUsername = String(payload?.robloxUsername || linkedUsername || '').trim();
+        const profileUpdatePayload: Record<string, string> = {
+          roblox_id: String(payload.robloxId),
+          roblox_verified_at: new Date().toISOString()
+        };
+
+        if (robloxUsername) {
+          profileUpdatePayload.roblox_username = robloxUsername;
+        }
+
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .update(profileUpdatePayload)
+          .eq('id', session.user.id);
+
+        if (profileError) {
+          throw profileError;
+        }
+
+        sessionStorage.removeItem(OAUTH_STATE_SESSION_KEY);
+
+        try {
+          await syncProfileRankFromRoblox({
+            profileId: session.user.id,
+            robloxId: payload.robloxId ? String(payload.robloxId) : null,
+            robloxUsername: robloxUsername || null
+          });
+        } catch (rankSyncError) {
+          console.warn('Roblox rank auto-sync failed after OAuth linking', rankSyncError);
+        }
+
+        const nextPath = await resolvePostAuthPath();
+        navigate(nextPath, { replace: true });
+      } catch (callbackError) {
+        console.error('Roblox OAuth callback handling failed', callbackError);
+        setError(errorMessage(callbackError, 'Unable to complete Roblox sign-in. Please try again.'));
+        sessionStorage.removeItem(OAUTH_STATE_SESSION_KEY);
+      } finally {
+        setProcessingCallback(false);
+        window.history.replaceState({}, document.title, window.location.pathname);
       }
+    };
 
-      const nextPath = await resolvePostAuthPath();
-      navigate(nextPath, { replace: true });
-    } catch (err) {
-      console.error('Roblox verification confirmation failed', err);
-      setError(errorMessage(err, 'Verification failed.'));
-    } finally {
-      setConfirmingCode(false);
-    }
-  };
+    void runCallback();
+  }, [linkedUsername, navigate]);
 
-  const handleUseDifferentAccount = () => {
-    setVerificationCode(null);
-    setError(null);
-    setSuccess(null);
-    setUsername('');
-  };
-
-  const handleGetNewCode = () => {
-    setError(null);
-    setSuccess(null);
-    void handleGenerate();
-  };
-
-  const isBusy = generatingCode || confirmingCode;
+  const isBusy = startingOauth || processingCallback;
 
   return (
     <section className="flex min-h-[70vh] items-center justify-center">
@@ -195,22 +196,33 @@ export default function LinkRobloxPage() {
         </div>
         <div className="text-center text-[10px] uppercase tracking-[0.35em] text-slate-400">Verification</div>
         <h2 className="mt-2 text-center text-3xl font-semibold uppercase tracking-[0.2em] text-silver">Link Your Roblox Account</h2>
-        <p className="mt-4 text-center text-slate-300">Enter your Roblox username, save the code to your profile bio, and confirm it here.</p>
+        <p className="mt-4 text-center text-slate-300">Use Roblox OAuth to securely link your account in one step.</p>
 
-        <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_1fr]">
-          <div>
-            <label htmlFor="roblox-username" className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">Your Roblox Username</label>
-            <input id="roblox-username" value={username} onChange={(e) => setUsername(e.target.value)} className="mt-2 w-full rounded border border-slateBlue/60 bg-[#0d121b] px-3 py-2 text-silver" />
-            <div className="mt-4 flex flex-wrap gap-3">
-              <button type="button" onClick={handleGetNewCode} disabled={isBusy} className="rounded border border-silver/50 bg-silver px-4 py-2 text-sm font-semibold uppercase tracking-[0.3em] text-slateBlue disabled:opacity-60">{generatingCode ? 'Generating...' : 'Get My Code'}</button>
-              <button type="button" onClick={handleUseDifferentAccount} disabled={isBusy} className="rounded border border-slateBlue/70 px-4 py-2 text-sm font-semibold uppercase tracking-[0.3em] text-silver disabled:opacity-60">Use a different Roblox account</button>
-            </div>
-          </div>
-          <div className="rounded border border-slateBlue/60 bg-[#0d121b] p-4">
-            <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Verification Code</div>
-            <div className="mt-2 rounded border border-silver/30 bg-slateBlue/20 p-3 font-mono text-lg text-silver">{verificationCode ?? 'Generate a code to begin'}</div>
-            <p className="mt-4 text-sm text-slate-300">Paste this code into your Roblox profile About section, save it, and confirm.</p>
-            <button type="button" onClick={handleConfirm} disabled={isBusy} className="mt-4 rounded border border-slateBlue/70 px-4 py-2 text-sm font-semibold uppercase tracking-[0.3em] text-silver disabled:opacity-60">{confirmingCode ? 'Confirming...' : 'Confirm'}</button>
+        <div className="mt-8 rounded border border-slateBlue/60 bg-[#0d121b] p-6 text-center">
+          <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">OAuth Login</div>
+          <p className="mt-3 text-sm text-slate-300">You will be redirected to Roblox to approve access, then returned here automatically.</p>
+          {linkedUsername && (
+            <p className="mt-3 text-xs text-slate-400">Current linked username: <span className="font-semibold text-silver">{linkedUsername}</span></p>
+          )}
+          <div className="mt-5 flex flex-wrap justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => void startOauthRedirect()}
+              disabled={isBusy}
+              className="rounded border border-silver/50 bg-silver px-4 py-2 text-sm font-semibold uppercase tracking-[0.3em] text-slateBlue disabled:opacity-60"
+            >
+              {processingCallback ? 'Completing OAuth...' : startingOauth ? 'Redirecting...' : 'Sign in with Roblox'}
+            </button>
+            {error && (
+              <button
+                type="button"
+                onClick={() => void startOauthRedirect()}
+                disabled={isBusy}
+                className="rounded border border-slateBlue/70 px-4 py-2 text-sm font-semibold uppercase tracking-[0.3em] text-silver disabled:opacity-60"
+              >
+                Try Again
+              </button>
+            )}
           </div>
         </div>
         {error && <p className="mt-4 text-sm text-red-400">{error}</p>}

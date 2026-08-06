@@ -12,6 +12,25 @@ function normalizePersonnelName(value?: string | null) {
   return String(value || '').trim().replace(/[_\s]+/g, '').toLowerCase();
 }
 
+function parseCookies(headerValue: string | null) {
+  const cookies: Record<string, string> = {};
+  if (!headerValue) {
+    return cookies;
+  }
+
+  headerValue.split(';').forEach((part) => {
+    const [rawKey, ...rest] = part.split('=');
+    const key = String(rawKey || '').trim();
+    if (!key) {
+      return;
+    }
+
+    cookies[key] = decodeURIComponent(rest.join('=').trim());
+  });
+
+  return cookies;
+}
+
 function getRateLimitKey(request: Request, env: any) {
   const forwarded = request.headers.get('x-forwarded-for') || '';
   const ip = forwarded.split(',')[0]?.trim() || 'unknown';
@@ -244,6 +263,17 @@ const BULK_USERNAME_MAX_RETRY_DELAY_MS = 30000;
 const BULK_USERNAME_INITIAL_BATCH_DELAY_MS = 2500;
 const SYNC_JOB_TTL_SECONDS = 15 * 60;
 const DEFAULT_SYNC_CONTINUATION_DELAY_MS = 4000;
+const OAUTH_CODE_CACHE_TTL_SECONDS = 60;
+
+type RobloxOauthCachedResult = {
+  statusCode: number;
+  payload: Record<string, unknown>;
+};
+
+type RobloxOauthCodeCacheEntry = {
+  status: 'pending' | 'complete';
+  result?: RobloxOauthCachedResult;
+};
 
 const DEFAULT_SUBREQUEST_BUDGET = 50;
 const MAX_FETCH_ATTEMPTS_PER_REQUEST = 3; // initial call + up to 2 retries
@@ -447,6 +477,82 @@ async function fetchWithRetry(
   }
 
   throw new Error('Retry loop exited unexpectedly.');
+}
+
+function buildOauthStateCookie(value: string, maxAgeSeconds: number) {
+  return `roblox_oauth_state=${encodeURIComponent(value)}; Path=/; Max-Age=${maxAgeSeconds}; HttpOnly; SameSite=Lax; Secure`;
+}
+
+function clearOauthStateCookie() {
+  return 'roblox_oauth_state=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax; Secure';
+}
+
+type OAuthCodeKvStore = {
+  get: (key: string, options?: { type: 'json' }) => Promise<unknown>;
+  put: (key: string, value: string, options?: { expirationTtl?: number }) => Promise<void>;
+};
+
+async function getOauthCodeCacheEntry(env: any, code: string) {
+  const store = env.ROBLOX_OAUTH_CODES as OAuthCodeKvStore | undefined;
+  if (!store || typeof store.get !== 'function') {
+    return null;
+  }
+
+  const payload = await store.get(code, { type: 'json' });
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const entry = payload as RobloxOauthCodeCacheEntry;
+  if (entry.status !== 'pending' && entry.status !== 'complete') {
+    return null;
+  }
+
+  return entry;
+}
+
+async function setOauthCodeCacheEntry(env: any, code: string, entry: RobloxOauthCodeCacheEntry) {
+  const store = env.ROBLOX_OAUTH_CODES as OAuthCodeKvStore | undefined;
+  if (!store || typeof store.put !== 'function') {
+    return false;
+  }
+
+  await store.put(code, JSON.stringify(entry), {
+    expirationTtl: OAUTH_CODE_CACHE_TTL_SECONDS
+  });
+
+  return true;
+}
+
+function resolveOauthRedirectUri(request: Request, env: any, requestedRedirectUri?: string | null) {
+  const configured = String(env.ROBLOX_OAUTH_REDIRECT_URI || '').trim();
+  if (configured) {
+    return configured;
+  }
+
+  const origin = new URL(request.url).origin;
+  const fallback = `${origin}/link-roblox`;
+  const requested = String(requestedRedirectUri || '').trim();
+  if (!requested) {
+    return fallback;
+  }
+
+  try {
+    const parsed = new URL(requested);
+    if (parsed.origin !== origin) {
+      return fallback;
+    }
+
+    if (parsed.pathname !== '/link-roblox') {
+      return fallback;
+    }
+
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return fallback;
+  }
 }
 
 async function fetchPersonnelExclusions(env: any) {
@@ -903,6 +1009,212 @@ function computeSyncContinuationDelayMs(env: any) {
 export default {
   async fetch(request: Request, env: any) {
     const url = new URL(request.url);
+
+    if (url.pathname === '/api/roblox/oauth/authorize-url' && request.method === 'POST') {
+      if (!(await enforceRateLimit(request, env, 10, 60_000))) {
+        return jsonResponse({ message: 'Too many OAuth start attempts. Please try again shortly.' }, 429);
+      }
+
+      try {
+        const body = await request.json().catch(() => ({}));
+        const state = String(body.state || '').trim();
+        if (!state || state.length < 16) {
+          return jsonResponse({ message: 'Missing or invalid OAuth state.' }, 400);
+        }
+
+        const clientId = String(env.ROBLOX_CLIENT_ID || '').trim();
+        if (!clientId) {
+          return jsonResponse({ message: 'Roblox OAuth is not configured.' }, 500);
+        }
+
+        const redirectUri = resolveOauthRedirectUri(request, env, body.redirectUri || null);
+        const authorizeUrl = new URL('https://apis.roblox.com/oauth/v1/authorize');
+        authorizeUrl.searchParams.set('client_id', clientId);
+        authorizeUrl.searchParams.set('redirect_uri', redirectUri);
+        authorizeUrl.searchParams.set('response_type', 'code');
+        authorizeUrl.searchParams.set('scope', 'openid profile group:read');
+        authorizeUrl.searchParams.set('state', state);
+
+        return jsonResponse(
+          {
+            authorizeUrl: authorizeUrl.toString(),
+            redirectUri
+          },
+          200,
+          {
+            'Set-Cookie': buildOauthStateCookie(state, 600)
+          }
+        );
+      } catch {
+        return jsonResponse({ message: 'Unable to start Roblox OAuth.' }, 500);
+      }
+    }
+
+    if (url.pathname === '/api/roblox/oauth/callback' && request.method === 'POST') {
+      if (!(await enforceRateLimit(request, env, 3, 60_000))) {
+        return jsonResponse({ message: 'Too many callback attempts. Please wait a moment and try again.' }, 429);
+      }
+
+      try {
+        const body = await request.json().catch(() => ({}));
+        const code = String(body.code || '').trim();
+        const state = String(body.state || '').trim();
+        const redirectUri = resolveOauthRedirectUri(request, env, body.redirectUri || null);
+        const cookies = parseCookies(request.headers.get('cookie'));
+        const issuedState = String(cookies.roblox_oauth_state || '').trim();
+
+        if (!code) {
+          return jsonResponse({ message: 'Missing authorization code.' }, 400, { 'Set-Cookie': clearOauthStateCookie() });
+        }
+
+        if (!state || !issuedState || state !== issuedState) {
+          return jsonResponse({ message: 'Invalid OAuth state. Please try again.' }, 400, { 'Set-Cookie': clearOauthStateCookie() });
+        }
+
+        if (!env.ROBLOX_OAUTH_CODES) {
+          return jsonResponse({ message: 'Roblox OAuth cache storage is not configured.' }, 500, { 'Set-Cookie': clearOauthStateCookie() });
+        }
+
+        const existing = await getOauthCodeCacheEntry(env, code);
+        if (existing?.status === 'complete' && existing.result) {
+          return jsonResponse(existing.result.payload, existing.result.statusCode, { 'Set-Cookie': clearOauthStateCookie() });
+        }
+
+        if (existing?.status === 'pending') {
+          for (let attempt = 0; attempt < 10; attempt += 1) {
+            await sleep(100);
+            const current = await getOauthCodeCacheEntry(env, code);
+            if (current?.status === 'complete' && current.result) {
+              return jsonResponse(current.result.payload, current.result.statusCode, { 'Set-Cookie': clearOauthStateCookie() });
+            }
+          }
+
+          return jsonResponse({ message: 'Authorization code is already being processed. Please wait a moment and try again.' }, 409, { 'Set-Cookie': clearOauthStateCookie() });
+        }
+
+        await setOauthCodeCacheEntry(env, code, {
+          status: 'pending'
+        });
+
+        const clientId = String(env.ROBLOX_CLIENT_ID || '').trim();
+        const clientSecret = String(env.ROBLOX_CLIENT_SECRET || '').trim();
+        if (!clientId || !clientSecret) {
+          const payload = { message: 'Roblox OAuth is not configured.' };
+          await setOauthCodeCacheEntry(env, code, {
+            status: 'complete',
+            result: { statusCode: 500, payload }
+          });
+          return jsonResponse(payload, 500, { 'Set-Cookie': clearOauthStateCookie() });
+        }
+
+        const tokenResponse = await fetchWithTimeout(
+          'https://apis.roblox.com/oauth/v1/token',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              grant_type: 'authorization_code',
+              client_id: clientId,
+              client_secret: clientSecret,
+              redirect_uri: redirectUri,
+              code
+            }).toString()
+          },
+          8000
+        );
+
+        if (tokenResponse.status === 429) {
+          const payload = { message: 'Roblox rate limited OAuth token exchange. Please wait a moment and try again.' };
+          await setOauthCodeCacheEntry(env, code, {
+            status: 'complete',
+            result: { statusCode: 429, payload }
+          });
+          return jsonResponse(payload, 429, { 'Set-Cookie': clearOauthStateCookie() });
+        }
+
+        if (!tokenResponse.ok) {
+          const payload = { message: 'Roblox OAuth token exchange failed. Please try again with a fresh login.' };
+          await setOauthCodeCacheEntry(env, code, {
+            status: 'complete',
+            result: { statusCode: 400, payload }
+          });
+          return jsonResponse(payload, 400, { 'Set-Cookie': clearOauthStateCookie() });
+        }
+
+        const tokenPayload = await tokenResponse.json().catch(() => ({}));
+        const accessToken = String(tokenPayload?.access_token || '').trim();
+        if (!accessToken) {
+          const payload = { message: 'Roblox OAuth returned an invalid token response.' };
+          await setOauthCodeCacheEntry(env, code, {
+            status: 'complete',
+            result: { statusCode: 502, payload }
+          });
+          return jsonResponse(payload, 502, { 'Set-Cookie': clearOauthStateCookie() });
+        }
+
+        const userInfoResponse = await fetchWithTimeout(
+          'https://apis.roblox.com/oauth/v1/userinfo',
+          {
+            method: 'GET',
+            headers: {
+              Accept: 'application/json',
+              Authorization: `Bearer ${accessToken}`
+            }
+          },
+          8000
+        );
+
+        if (userInfoResponse.status === 429) {
+          const payload = { message: 'Roblox rate limited user profile lookup. Please wait a moment and try again.' };
+          await setOauthCodeCacheEntry(env, code, {
+            status: 'complete',
+            result: { statusCode: 429, payload }
+          });
+          return jsonResponse(payload, 429, { 'Set-Cookie': clearOauthStateCookie() });
+        }
+
+        if (!userInfoResponse.ok) {
+          const payload = { message: 'Unable to fetch Roblox user profile from OAuth.' };
+          await setOauthCodeCacheEntry(env, code, {
+            status: 'complete',
+            result: { statusCode: 502, payload }
+          });
+          return jsonResponse(payload, 502, { 'Set-Cookie': clearOauthStateCookie() });
+        }
+
+        const userInfo = await userInfoResponse.json().catch(() => ({}));
+        const robloxId = String(userInfo?.sub || userInfo?.userId || userInfo?.id || '').trim();
+        const robloxUsername = String(userInfo?.preferred_username || userInfo?.name || userInfo?.nickname || '').trim();
+
+        if (!robloxId) {
+          const payload = { message: 'Roblox OAuth did not return a usable user id.' };
+          await setOauthCodeCacheEntry(env, code, {
+            status: 'complete',
+            result: { statusCode: 502, payload }
+          });
+          return jsonResponse(payload, 502, { 'Set-Cookie': clearOauthStateCookie() });
+        }
+
+        const successPayload = {
+          verified: true,
+          robloxId,
+          robloxUsername
+        };
+
+        await setOauthCodeCacheEntry(env, code, {
+          status: 'complete',
+          result: {
+            statusCode: 200,
+            payload: successPayload
+          }
+        });
+
+        return jsonResponse(successPayload, 200, { 'Set-Cookie': clearOauthStateCookie() });
+      } catch (error) {
+        console.error('roblox oauth callback failed', error);
+        return jsonResponse({ message: 'Unable to complete Roblox OAuth callback. Please try again.' }, 500, { 'Set-Cookie': clearOauthStateCookie() });
+      }
+    }
 
     if (url.pathname === '/api/roblox/user-rank' && request.method === 'POST') {
       if (!(await enforceRateLimit(request, env, 15, 60_000))) {

@@ -46,6 +46,18 @@ type PeakStat = {
   date: string;
 };
 
+type OverallStatRank = {
+  rank: number | null;
+  totalParticipants: number;
+};
+
+type CareerStatRanks = {
+  kills: OverallStatRank;
+  deaths: OverallStatRank;
+  assists: OverallStatRank;
+  events: OverallStatRank;
+};
+
 function normalizeName(value?: string | null) {
   return String(value || '').trim().replace(/[_\s]+/g, '').toLowerCase();
 }
@@ -103,6 +115,7 @@ export default function ProfilePage() {
   const [avatarIndex, setAvatarIndex] = useState(0);
   const [avatarLoading, setAvatarLoading] = useState(false);
   const [logs, setLogs] = useState<BattleStatLog[]>([]);
+  const [allStatLogs, setAllStatLogs] = useState<BattleStatLog[]>([]);
   const [battlesById, setBattlesById] = useState<Map<string, Battle>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -165,6 +178,7 @@ export default function ProfilePage() {
         if (battleError) throw battleError;
 
         const filteredLogs = ((statData || []) as BattleStatLog[]).filter((entry) => aliases.includes(normalizeName(entry.participant_name)));
+        const completeLogs = (statData || []) as BattleStatLog[];
         const battleMap = new Map<string, Battle>();
         ((battleData || []) as Battle[]).forEach((battle) => battleMap.set(battle.id, battle));
         setAvatarLoading(true);
@@ -182,6 +196,7 @@ export default function ProfilePage() {
         setProfile(currentProfile);
         setCompanyDraft(currentProfile.company || 'Unassigned');
         setLogs(filteredLogs);
+        setAllStatLogs(completeLogs);
         setBattlesById(battleMap);
         setAvatarCandidates(candidates);
         setAvatarIndex(0);
@@ -255,6 +270,88 @@ export default function ProfilePage() {
   }), { kills: 0, deaths: 0, assists: 0 }), [logs]);
 
   const careerEventsAttended = useMemo(() => new Set(logs.map((entry) => entry.battle_id).filter(Boolean)).size, [logs]);
+
+  const careerStatRanks = useMemo<CareerStatRanks>(() => {
+    const aliases = [profile?.robloxUsername, profile?.discordUsername, profile?.callsign]
+      .map((value) => normalizeName(value))
+      .filter(Boolean);
+    const aliasSet = new Set(aliases);
+
+    const byParticipant = new Map<string, { kills: number; deaths: number; assists: number; battleIds: Set<string> }>();
+    allStatLogs.forEach((entry) => {
+      const nameKey = normalizeName(entry.participant_name);
+      if (!nameKey) {
+        return;
+      }
+
+      if (!byParticipant.has(nameKey)) {
+        byParticipant.set(nameKey, {
+          kills: 0,
+          deaths: 0,
+          assists: 0,
+          battleIds: new Set<string>()
+        });
+      }
+
+      const bucket = byParticipant.get(nameKey);
+      if (!bucket) {
+        return;
+      }
+
+      bucket.kills += Number(entry.kills) || 0;
+      bucket.deaths += Number(entry.deaths) || 0;
+      bucket.assists += Number(entry.assists) || 0;
+      if (entry.battle_id) {
+        bucket.battleIds.add(entry.battle_id);
+      }
+    });
+
+    const competitors = Array.from(byParticipant.entries())
+      .filter(([name]) => !aliasSet.has(name))
+      .map(([, totals]) => ({
+        kills: totals.kills,
+        deaths: totals.deaths,
+        assists: totals.assists,
+        events: totals.battleIds.size
+      }));
+
+    competitors.push({
+      kills: careerTotals.kills,
+      deaths: careerTotals.deaths,
+      assists: careerTotals.assists,
+      events: careerEventsAttended
+    });
+
+    const buildRank = (field: 'kills' | 'deaths' | 'assists' | 'events', value: number): OverallStatRank => {
+      if (!Number.isFinite(value) || value <= 0) {
+        return {
+          rank: null,
+          totalParticipants: competitors.length
+        };
+      }
+
+      const higherCount = competitors.filter((entry) => Number(entry[field]) > value).length;
+      return {
+        rank: higherCount + 1,
+        totalParticipants: competitors.length
+      };
+    };
+
+    return {
+      kills: buildRank('kills', careerTotals.kills),
+      deaths: buildRank('deaths', careerTotals.deaths),
+      assists: buildRank('assists', careerTotals.assists),
+      events: buildRank('events', careerEventsAttended)
+    };
+  }, [allStatLogs, careerEventsAttended, careerTotals, profile]);
+
+  const formatOverallRank = (value: OverallStatRank) => {
+    if (!value.rank) {
+      return 'Overall Rank: Unranked';
+    }
+
+    return `Overall Rank: #${value.rank} of ${value.totalParticipants}`;
+  };
 
   const peakStats = useMemo<PeakStat[]>(() => {
     const withBattleContext = logs.map((entry) => {
@@ -404,18 +501,22 @@ export default function ProfilePage() {
               <div className="rounded border border-slateBlue/70 bg-[#141a24] p-5">
                 <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Career Kills</div>
                 <div className="mt-2 font-mono text-3xl font-semibold text-silver">{careerTotals.kills}</div>
+                <div className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-400">{formatOverallRank(careerStatRanks.kills)}</div>
               </div>
               <div className="rounded border border-slateBlue/70 bg-[#141a24] p-5">
                 <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Career Deaths</div>
                 <div className="mt-2 font-mono text-3xl font-semibold text-silver">{careerTotals.deaths}</div>
+                <div className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-400">{formatOverallRank(careerStatRanks.deaths)}</div>
               </div>
               <div className="rounded border border-slateBlue/70 bg-[#141a24] p-5">
                 <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Career Assists</div>
                 <div className="mt-2 font-mono text-3xl font-semibold text-silver">{careerTotals.assists}</div>
+                <div className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-400">{formatOverallRank(careerStatRanks.assists)}</div>
               </div>
               <div className="rounded border border-slateBlue/70 bg-[#141a24] p-5">
                 <div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Career Events Attended</div>
                 <div className="mt-2 font-mono text-3xl font-semibold text-silver">{careerEventsAttended}</div>
+                <div className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-400">{formatOverallRank(careerStatRanks.events)}</div>
               </div>
             </div>
           </div>

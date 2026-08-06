@@ -7,6 +7,11 @@ binding = "SYNC_PROGRESS"
 id = "63cbd7bd5f4949a69c900b8012aa5114"
 preview_id = "REPLACE_WITH_SYNC_PROGRESS_KV_PREVIEW_ID"
 
+[[kv_namespaces]]
+binding = "ROBLOX_OAUTH_CODES"
+id = "b3f77cb42e9f40b099263673dd823e71"
+preview_id = "REPLACE_WITH_ROBLOX_OAUTH_CODES_KV_PREVIEW_ID"
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"

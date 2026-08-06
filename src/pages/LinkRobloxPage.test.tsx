@@ -51,12 +51,45 @@ describe('LinkRobloxPage', () => {
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
-      json: async () => ({ verified: true, robloxId: 123 })
+      json: async () => ({ authorizeUrl: 'https://apis.roblox.com/oauth/v1/authorize?client_id=abc' })
     } as Response);
+
+    sessionStorage.clear();
+    window.history.replaceState({}, '', '/link-roblox');
   });
 
-  it('keeps the entered username and shows a generated code when Get My Code is clicked', async () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+  it('starts OAuth by requesting an authorize URL and redirecting the browser', async () => {
+    render(
+      <MemoryRouter>
+        <LinkRobloxPage />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /sign in with roblox/i }));
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        '/api/roblox/oauth/authorize-url',
+        expect.objectContaining({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: expect.any(String)
+        })
+      );
+    });
+
+    expect(sessionStorage.getItem('roblox_oauth_state')).toBeTruthy();
+  });
+
+  it('handles OAuth callback once and updates the linked profile', async () => {
+    sessionStorage.setItem('roblox_oauth_state', 'state-1234567890abcd');
+    window.history.replaceState({}, '', '/link-roblox?code=abc123&state=state-1234567890abcd');
+
+    (globalThis.fetch as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ verified: true, robloxId: '999', robloxUsername: 'Builderman' })
+      });
 
     render(
       <MemoryRouter>
@@ -64,50 +97,24 @@ describe('LinkRobloxPage', () => {
       </MemoryRouter>
     );
 
-    const usernameInput = screen.getByLabelText(/your roblox username/i);
-    fireEvent.change(usernameInput, { target: { value: 'Builderman' } });
-    fireEvent.click(screen.getByRole('button', { name: /get my code/i }));
-
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        '/api/roblox/verify-username',
-        expect.objectContaining({
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: 'Builderman' })
-        })
+        '/api/roblox/oauth/callback',
+        expect.objectContaining({ method: 'POST' })
       );
     });
 
     await waitFor(() => {
       expect(profileUpdate).toHaveBeenCalledWith(
         expect.objectContaining({
-          roblox_username: 'Builderman',
-          roblox_verification_code: 'LEGION-800000'
+          roblox_id: '999',
+          roblox_username: 'Builderman'
         })
       );
     });
 
-    expect((usernameInput as HTMLInputElement).value).toBe('Builderman');
-    expect(screen.getByText('LEGION-800000')).toBeInTheDocument();
-  });
-
-  it('shows an error message when code generation fails', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
-      ok: false,
-      json: async () => ({ message: 'Unable to validate that Roblox username right now.' })
-    } as Response);
-
-    render(
-      <MemoryRouter>
-        <LinkRobloxPage />
-      </MemoryRouter>
-    );
-
-    fireEvent.change(screen.getByLabelText(/your roblox username/i), { target: { value: 'Builderman' } });
-    fireEvent.click(screen.getByRole('button', { name: /get my code/i }));
-
-    expect(await screen.findByText(/unable to validate that roblox username right now/i)).toBeInTheDocument();
-    expect(screen.getByText(/generate a code to begin/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/', { replace: true });
+    });
   });
 });
