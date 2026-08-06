@@ -15,6 +15,8 @@ import LinkRobloxPage from './pages/LinkRobloxPage';
 import ApplyPage from './pages/ApplyPage';
 import AdminPage from './pages/AdminPage';
 import ProfilePage from './pages/ProfilePage';
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
+import TermsOfServicePage from './pages/TermsOfServicePage';
 import { getAuthenticatedState } from './lib/auth';
 import { supabase } from './lib/supabase';
 
@@ -104,6 +106,8 @@ function App() {
         <Route path="/medals" element={<MedalsPage />} />
         <Route path="/leaderboard" element={<LeaderboardPage />} />
         <Route path="/rally-tracker" element={<RallyTrackerPage />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+        <Route path="/terms-of-service" element={<TermsOfServicePage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route
           path="/link-roblox"
