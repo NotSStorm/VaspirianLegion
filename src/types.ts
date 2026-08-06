@@ -70,6 +70,7 @@ export interface Application {
   callsign: string;
   timezone: string;
   requested_company?: string | null;
+  requested_group_rank?: string | null;
   requested_group_join: boolean;
   status: string;
   reviewed_by?: string | null;
@@ -81,6 +82,8 @@ export interface RosterEntry {
   id: string;
   profile_id: string;
   rank: string;
+  group_rank?: string | null;
+  last_group_rank_sync_at?: string | null;
   callsign: string;
   company?: string | null;
   created_at: string;

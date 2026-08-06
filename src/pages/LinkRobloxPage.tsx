@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import LegionCrest from '../components/shared/LegionCrest';
 import { supabase } from '../lib/supabase';
 import { getAuthenticatedState, resolvePostAuthPath } from '../lib/auth';
+import { syncProfileRankFromRoblox } from '../lib/robloxRanks';
 
 function randomCode() {
   return `LEGION-${Math.floor(Math.random() * 0x1000000).toString(16).toUpperCase()}`;
@@ -149,6 +150,16 @@ export default function LinkRobloxPage() {
 
       if (profileError) {
         throw profileError;
+      }
+
+      try {
+        await syncProfileRankFromRoblox({
+          profileId: session.user.id,
+          robloxId: payload.robloxId ? String(payload.robloxId) : null,
+          robloxUsername: trimmedUsername
+        });
+      } catch (rankSyncError) {
+        console.warn('Roblox rank auto-sync failed after account linking', rankSyncError);
       }
 
       const nextPath = await resolvePostAuthPath();

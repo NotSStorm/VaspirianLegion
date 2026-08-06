@@ -3,6 +3,7 @@ import { CheckCircle2 } from 'lucide-react';
 import LegionCrest from '../components/shared/LegionCrest';
 import { supabase } from '../lib/supabase';
 import { verifyMinimumGroupRank } from '../lib/auth';
+import { syncProfileRankFromRoblox } from '../lib/robloxRanks';
 import type { Profile } from '../types';
 
 const TIMEZONE_PATTERN = /^(UTC|GMT|EST|EDT|CST|CDT|MST|MDT|PST|PDT|[A-Z]{2,4}|[A-Za-z]+(?:\/[A-Za-z_]+)*)$/;
@@ -123,12 +124,32 @@ export default function ApplyPage() {
 
     setSubmitting(true);
     try {
+      let requestedGroupRank = String(resolvedProfile?.rank || '').trim() || null;
+      if (resolvedProfile?.id && resolvedProfile.roblox_username) {
+        try {
+          const syncedRank = await syncProfileRankFromRoblox({
+            profileId: resolvedProfile.id,
+            robloxId: resolvedProfile.roblox_id || null,
+            robloxUsername: resolvedProfile.roblox_username || null
+          });
+          requestedGroupRank = String(syncedRank || requestedGroupRank || '').trim() || null;
+          if (syncedRank) {
+            const nextProfile = { ...resolvedProfile, rank: syncedRank };
+            resolvedProfile = nextProfile;
+            setProfile(nextProfile);
+          }
+        } catch (rankSyncError) {
+          console.warn('Unable to auto-sync Roblox rank during application submission', rankSyncError);
+        }
+      }
+
       const { error } = await supabase.from('applications').insert({
         profile_id: resolvedProfile!.id,
         service_number: `APP-${Date.now().toString(36).toUpperCase()}`,
         callsign: callsign,
         timezone: normalizedTimezone,
         requested_company: normalizedCompany,
+        requested_group_rank: requestedGroupRank,
         requested_group_join: true,
         status: 'pending'
       }).select('*').single();
@@ -217,6 +238,7 @@ export default function ApplyPage() {
           <div className="mt-4 space-y-3 text-sm text-slate-300">
             <div className="rounded border border-slateBlue/60 p-3"><div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Status</div><div className="font-semibold text-silver">Applicant</div></div>
             <div className="rounded border border-slateBlue/60 p-3"><div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Discord</div><div className="font-semibold text-silver">{normalizeDiscordName(profile?.discord_username)}</div></div>
+            <div className="rounded border border-slateBlue/60 p-3"><div className="text-[10px] uppercase tracking-[0.3em] text-slate-400">Incoming Roblox Rank</div><div className="font-semibold text-silver">{profile?.rank || 'Not yet synced'}</div></div>
           </div>
         </div>
 
