@@ -18,6 +18,25 @@ type StatLog = {
   }> | null;
 };
 
+type RosterUnitRow = {
+  callsign?: string | null;
+  company?: string | null;
+  profile?: {
+    roblox_username?: string | null;
+    discord_username?: string | null;
+    callsign?: string | null;
+  } | Array<{
+    roblox_username?: string | null;
+    discord_username?: string | null;
+    callsign?: string | null;
+  }> | null;
+};
+
+type PersonnelUnitRow = {
+  roblox_username?: string | null;
+  unit?: string | null;
+};
+
 type TrendPoint = {
   pointKey: string;
   battleId: string;
@@ -42,6 +61,10 @@ function unitBucket(unit: string) {
   if (lowered.includes('melrose') || lowered.includes('87th')) return 'melrose';
   if (lowered.includes('pirkland') || lowered.includes('82nd')) return 'pirkland';
   return 'other';
+}
+
+function normalizeAlias(value?: string | null) {
+  return String(value || '').trim().replace(/[_\s]+/g, '').toLowerCase();
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -95,9 +118,46 @@ export default function RallyTrackerPage() {
   const warnedMissingBattleDateRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
-    const { data: logs } = await supabase
-      .from('battle_stat_logs')
-      .select('id, battle_id, participant_name, unit, kills, deaths, assists, created_at, battles(start_date)');
+    const [{ data: logs }, { data: rosterData }, { data: personnelData }] = await Promise.all([
+      supabase
+        .from('battle_stat_logs')
+        .select('id, battle_id, participant_name, unit, kills, deaths, assists, created_at, battles(start_date)'),
+      supabase
+        .from('roster')
+        .select('callsign, company, profile:profiles!roster_profile_id_fkey(roblox_username, discord_username, callsign)'),
+      supabase
+        .from('personnel')
+        .select('roblox_username, unit')
+    ]);
+
+    const unitByAlias: Record<string, string> = {};
+
+    // Roster is admin-authoritative; populate first so personnel can fill remaining gaps.
+    ((rosterData || []) as RosterUnitRow[]).forEach((entry) => {
+      const unit = String(entry.company || '').trim();
+      if (!unit || unit.toLowerCase() === 'unassigned') {
+        return;
+      }
+
+      const profileRaw = entry.profile;
+      const profile = Array.isArray(profileRaw) ? profileRaw[0] : profileRaw;
+      [entry.callsign, profile?.roblox_username, profile?.discord_username, profile?.callsign].forEach((aliasValue) => {
+        const alias = normalizeAlias(aliasValue);
+        if (alias) {
+          unitByAlias[alias] = unit;
+        }
+      });
+    });
+
+    // Personnel fills in anyone not already resolved via roster.
+    ((personnelData || []) as PersonnelUnitRow[]).forEach((entry) => {
+      const alias = normalizeAlias(entry.roblox_username);
+      const unit = String(entry.unit || '').trim();
+      if (!alias || !unit || unit.toLowerCase() === 'unassigned' || unitByAlias[alias]) {
+        return;
+      }
+      unitByAlias[alias] = unit;
+    });
 
     const now = new Date();
 
@@ -150,8 +210,9 @@ export default function RallyTrackerPage() {
         const name = entry.participant_name.trim();
         if (!name) return;
 
+        const resolvedUnit = unitByAlias[normalizeAlias(entry.participant_name)] || String(entry.unit || '').trim() || 'Unassigned';
         existing.total.add(name);
-        const bucket = unitBucket(entry.unit || '');
+        const bucket = unitBucket(resolvedUnit);
         if (bucket === 'melrose') existing.melrose.add(name);
         if (bucket === 'pirkland') existing.pirkland.add(name);
         grouped.set(key, existing);

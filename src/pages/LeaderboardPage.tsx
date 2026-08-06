@@ -18,6 +18,25 @@ type StatLog = {
   }> | null;
 };
 
+type RosterUnitRow = {
+  callsign?: string | null;
+  company?: string | null;
+  profile?: {
+    roblox_username?: string | null;
+    discord_username?: string | null;
+    callsign?: string | null;
+  } | Array<{
+    roblox_username?: string | null;
+    discord_username?: string | null;
+    callsign?: string | null;
+  }> | null;
+};
+
+type PersonnelUnitRow = {
+  roblox_username?: string | null;
+  unit?: string | null;
+};
+
 type LeaderEntry = {
   name: string;
   unit: string;
@@ -49,17 +68,67 @@ const metricLabels: Record<Metric, string> = {
   'high-scores': 'Single-Event High Scores'
 };
 
+function normalizeAlias(value?: string | null) {
+  return String(value || '').trim().replace(/[_\s]+/g, '').toLowerCase();
+}
+
 export default function LeaderboardPage() {
   const [logs, setLogs] = useState<StatLog[]>([]);
   const [metric, setMetric] = useState<Metric>('kills');
   const warnedMissingBattleDateRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
-    const { data: statData } = await supabase
-      .from('battle_stat_logs')
-      .select('id, battle_id, participant_name, unit, kills, deaths, assists, created_at, battles(start_date)');
+    const [{ data: statData }, { data: rosterData }, { data: personnelData }] = await Promise.all([
+      supabase
+        .from('battle_stat_logs')
+        .select('id, battle_id, participant_name, unit, kills, deaths, assists, created_at, battles(start_date)'),
+      supabase
+        .from('roster')
+        .select('callsign, company, profile:profiles!roster_profile_id_fkey(roblox_username, discord_username, callsign)'),
+      supabase
+        .from('personnel')
+        .select('roblox_username, unit')
+    ]);
 
-    setLogs((statData || []) as StatLog[]);
+    const unitByAlias: Record<string, string> = {};
+
+    // Roster is admin-authoritative; populate first so personnel can fill remaining gaps.
+    ((rosterData || []) as RosterUnitRow[]).forEach((entry) => {
+      const unit = String(entry.company || '').trim();
+      if (!unit || unit.toLowerCase() === 'unassigned') {
+        return;
+      }
+
+      const profileRaw = entry.profile;
+      const profile = Array.isArray(profileRaw) ? profileRaw[0] : profileRaw;
+      [entry.callsign, profile?.roblox_username, profile?.discord_username, profile?.callsign].forEach((aliasValue) => {
+        const alias = normalizeAlias(aliasValue);
+        if (alias) {
+          unitByAlias[alias] = unit;
+        }
+      });
+    });
+
+    // Personnel fills in anyone not already resolved via roster.
+    ((personnelData || []) as PersonnelUnitRow[]).forEach((entry) => {
+      const alias = normalizeAlias(entry.roblox_username);
+      const unit = String(entry.unit || '').trim();
+      if (!alias || !unit || unit.toLowerCase() === 'unassigned' || unitByAlias[alias]) {
+        return;
+      }
+      unitByAlias[alias] = unit;
+    });
+
+    const resolvedLogs = ((statData || []) as StatLog[]).map((log) => {
+      const alias = normalizeAlias(log.participant_name);
+      const resolvedUnit = unitByAlias[alias] || String(log.unit || '').trim() || 'Unassigned';
+      return {
+        ...log,
+        unit: resolvedUnit
+      };
+    });
+
+    setLogs(resolvedLogs);
   }, []);
 
   const parseBattleDate = (log: StatLog): Date | null => {
