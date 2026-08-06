@@ -115,10 +115,16 @@ export default function BattlesPage() {
       setIsStaff(profile?.role === 'admin' || profile?.role === 'officer');
       setHasSession(Boolean(session?.user));
 
-      const [{ data: battleData, error: battleError }, { data: logData, error: logError }, { data: rosterData, error: rosterError }] = await Promise.all([
+      const [
+        { data: battleData, error: battleError },
+        { data: logData, error: logError },
+        { data: rosterData, error: rosterError },
+        { data: personnelData }
+      ] = await Promise.all([
         supabase.from('battles').select('*').order('start_date', { ascending: false }),
         supabase.from('battle_stat_logs').select('id, battle_id, participant_name, unit, kills, deaths, assists').order('created_at', { ascending: false }),
-        supabase.from('roster').select('callsign, company, profile:profiles!roster_profile_id_fkey(roblox_username, discord_username)')
+        supabase.from('roster').select('callsign, company, profile:profiles!roster_profile_id_fkey(roblox_username, discord_username)'),
+        supabase.from('personnel').select('roblox_username, unit')
       ]);
 
       if (battleError) throw battleError;
@@ -127,6 +133,17 @@ export default function BattlesPage() {
 
       const normalizeName = (value: string) => value.replace(/[_\s]+/g, '').toLowerCase();
       const nameMap: Record<string, string> = {};
+
+      ((personnelData || []) as Array<{ roblox_username?: string | null; unit?: string | null }>).forEach((entry) => {
+        const username = String(entry.roblox_username || '').trim();
+        const unit = String(entry.unit || '').trim();
+        if (!username || !unit) {
+          return;
+        }
+
+        nameMap[normalizeName(username)] = unit;
+      });
+
       (rosterData || []).forEach((entry: any) => {
         const unit = String(entry.company || 'Unassigned');
         const aliases = [entry?.profile?.roblox_username, entry?.profile?.discord_username, entry?.callsign]
