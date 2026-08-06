@@ -1,6 +1,13 @@
 name = "regionofvaspiria"
 compatibility_date = "2026-07-01"
 main = "./src/worker.ts"
+routes = [
+	{ pattern = "regionofvaspiria.com", custom_domain = true }
+]
+
+[vars]
+ROBLOX_CLIENT_ID = "8125208813163703919"
+ROBLOX_OAUTH_REDIRECT_URI = "https://regionofvaspiria.com/link-roblox"
 
 [[kv_namespaces]]
 binding = "SYNC_PROGRESS"
