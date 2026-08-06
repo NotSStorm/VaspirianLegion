@@ -44,26 +44,47 @@ function unitBucket(unit: string) {
   return 'other';
 }
 
-const TRENDLINE_WINDOW_SIZE = 5;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-function computeMovingAverage(values: number[], windowSize: number) {
-  if (values.length === 0) return [];
-  const size = Math.max(1, Math.floor(windowSize));
-  const half = Math.floor(size / 2);
+function solve3x3(matrix: number[][], vector: number[]) {
+  const a = matrix.map((row) => [...row]);
+  const b = [...vector];
+  const n = 3;
 
-  return values.map((_, index) => {
-    const start = Math.max(0, index - half);
-    const end = Math.min(values.length - 1, index + half);
-    let sum = 0;
-    let count = 0;
-
-    for (let i = start; i <= end; i += 1) {
-      sum += values[i];
-      count += 1;
+  for (let col = 0; col < n; col += 1) {
+    let pivotRow = col;
+    for (let row = col + 1; row < n; row += 1) {
+      if (Math.abs(a[row][col]) > Math.abs(a[pivotRow][col])) {
+        pivotRow = row;
+      }
     }
 
-    return count > 0 ? sum / count : values[index];
-  });
+    if (Math.abs(a[pivotRow][col]) < 1e-12) {
+      return null;
+    }
+
+    if (pivotRow !== col) {
+      [a[col], a[pivotRow]] = [a[pivotRow], a[col]];
+      [b[col], b[pivotRow]] = [b[pivotRow], b[col]];
+    }
+
+    const pivot = a[col][col];
+    for (let j = col; j < n; j += 1) {
+      a[col][j] /= pivot;
+    }
+    b[col] /= pivot;
+
+    for (let row = 0; row < n; row += 1) {
+      if (row === col) continue;
+      const factor = a[row][col];
+      for (let j = col; j < n; j += 1) {
+        a[row][j] -= factor * a[col][j];
+      }
+      b[row] -= factor * b[col];
+    }
+  }
+
+  return b;
 }
 
 export default function RallyTrackerPage() {
@@ -266,16 +287,65 @@ export default function RallyTrackerPage() {
     x: xForDate(point.parsedDate),
     y: yForValue(selector(point)),
     value: selector(point),
-    date: point.date
+    date: point.date,
+    parsedDate: point.parsedDate
   }));
 
-  const buildTrendSeries = (series: Array<{ pointKey: string; battleId: string; x: number; y: number; value: number; date: string }>) => {
-    const averaged = computeMovingAverage(series.map((point) => point.value), TRENDLINE_WINDOW_SIZE);
-    return series.map((point, index) => ({
-      ...point,
-      y: yForValue(averaged[index]),
-      value: averaged[index]
-    }));
+  const buildQuadraticTrendSeries = (series: Array<{ pointKey: string; battleId: string; x: number; y: number; value: number; date: string; parsedDate: Date }>) => {
+    if (series.length < 3) {
+      return series;
+    }
+
+    const baseTime = series[0].parsedDate.getTime();
+    const xs = series.map((point) => (point.parsedDate.getTime() - baseTime) / DAY_MS);
+    const ys = series.map((point) => point.value);
+
+    let sx = 0;
+    let sx2 = 0;
+    let sx3 = 0;
+    let sx4 = 0;
+    let sy = 0;
+    let sxy = 0;
+    let sx2y = 0;
+
+    for (let i = 0; i < xs.length; i += 1) {
+      const x = xs[i];
+      const y = ys[i];
+      const x2 = x * x;
+      sx += x;
+      sx2 += x2;
+      sx3 += x2 * x;
+      sx4 += x2 * x2;
+      sy += y;
+      sxy += x * y;
+      sx2y += x2 * y;
+    }
+
+    const n = xs.length;
+    const coeffs = solve3x3(
+      [
+        [sx4, sx3, sx2],
+        [sx3, sx2, sx],
+        [sx2, sx, n]
+      ],
+      [sx2y, sxy, sy]
+    );
+
+    if (!coeffs) {
+      return series;
+    }
+
+    const [a, b, c] = coeffs;
+
+    return series.map((point, index) => {
+      const x = xs[index];
+      const trendValue = a * x * x + b * x + c;
+      return {
+        ...point,
+        y: yForValue(trendValue),
+        value: trendValue
+      };
+    });
   };
 
   const toSmoothPath = (linePoints: Array<{ x: number; y: number }>) => {
@@ -303,9 +373,9 @@ export default function RallyTrackerPage() {
   const totalSeries = seriesPoints((point) => point.total);
   const pirklandSeries = seriesPoints((point) => point.pirkland);
   const melroseSeries = seriesPoints((point) => point.melrose);
-  const totalTrendSeries = buildTrendSeries(totalSeries);
-  const pirklandTrendSeries = buildTrendSeries(pirklandSeries);
-  const melroseTrendSeries = buildTrendSeries(melroseSeries);
+  const totalTrendSeries = buildQuadraticTrendSeries(totalSeries);
+  const pirklandTrendSeries = buildQuadraticTrendSeries(pirklandSeries);
+  const melroseTrendSeries = buildQuadraticTrendSeries(melroseSeries);
 
   const formatTickDate = (date: Date) => `${date.getUTCMonth() + 1}/${date.getUTCDate()}/${date.getUTCFullYear()}`;
   const visibleMonthlyTicks = useMemo(() => {
