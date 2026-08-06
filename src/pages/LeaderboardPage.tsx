@@ -74,14 +74,16 @@ export default function LeaderboardPage() {
   }, []);
 
   const resolveLogDate = (log: StatLog) => {
-    const battleDate = battleDates.get(log.battle_id);
-    if (battleDate && !Number.isNaN(battleDate.getTime())) {
-      return battleDate;
-    }
-
+    // Prefer the log creation timestamp so weekly/monthly windows reflect
+    // when stats were actually recorded.
     const createdAt = new Date(log.created_at);
     if (!Number.isNaN(createdAt.getTime())) {
       return createdAt;
+    }
+
+    const battleDate = battleDates.get(log.battle_id);
+    if (battleDate && !Number.isNaN(battleDate.getTime())) {
+      return battleDate;
     }
 
     return null;

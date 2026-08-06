@@ -83,12 +83,12 @@ describe('BattlesPage', () => {
       expect(screen.getByText(/battles ledger/i)).toBeInTheDocument();
     });
 
-    expect(screen.getAllByRole('button', { name: /view logs/i })).toHaveLength(12);
+    expect(screen.getAllByRole('button', { name: /view logs/i })).toHaveLength(4);
     expect(screen.getByRole('button', { name: /show 12 more battles/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /show 12 more battles/i }));
 
-    expect(screen.getAllByRole('button', { name: /view logs/i })).toHaveLength(24);
+    expect(screen.getAllByRole('button', { name: /view logs/i })).toHaveLength(16);
     expect(screen.getByRole('button', { name: /show 12 more battles/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /show 12 more battles/i }));
@@ -97,7 +97,7 @@ describe('BattlesPage', () => {
     expect(screen.getByRole('button', { name: /hide all extra battles/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /hide all extra battles/i }));
 
-    expect(screen.getAllByRole('button', { name: /view logs/i })).toHaveLength(12);
+    expect(screen.getAllByRole('button', { name: /view logs/i })).toHaveLength(4);
     expect(screen.getByRole('button', { name: /show 12 more battles/i })).toBeInTheDocument();
   });
   

@@ -62,15 +62,17 @@ export default function RallyTrackerPage() {
     });
 
     const resolveDate = (entry: StatLog) => {
+      // Prefer the log creation timestamp so weekly/monthly windows reflect
+      // when attendance logs were actually recorded.
+      const createdAt = new Date(entry.created_at);
+      if (!Number.isNaN(createdAt.getTime())) {
+        return createdAt;
+      }
+
       const battle = battleMap.get(entry.battle_id);
       const battleDate = battle ? new Date(battle.start_date) : null;
       if (battleDate && !Number.isNaN(battleDate.getTime())) {
         return battleDate;
-      }
-
-      const createdAt = new Date(entry.created_at);
-      if (!Number.isNaN(createdAt.getTime())) {
-        return createdAt;
       }
 
       return null;

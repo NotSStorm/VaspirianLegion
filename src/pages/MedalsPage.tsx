@@ -43,7 +43,7 @@ export default function MedalsPage() {
   const [medals, setMedals] = useState<MedalRecord[]>([]);
   const [profiles, setProfiles] = useState<ProfileOption[]>([]);
   const [isStaff, setIsStaff] = useState(false);
-  const [visibleMedalCount, setVisibleMedalCount] = useState(12);
+  const [visibleMedalCount, setVisibleMedalCount] = useState(4);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -109,7 +109,7 @@ export default function MedalsPage() {
 
   const hasPastMedals = medals.length > visibleMedalCount;
   const visibleMedals = useMemo(() => medals.slice(0, visibleMedalCount), [medals, visibleMedalCount]);
-  const canResetMedalList = visibleMedalCount > 12;
+  const canResetMedalList = visibleMedalCount > 4;
 
   const filteredRecipientsForMany = useMemo(() => {
     const query = recipientSearch.trim().toLowerCase();
@@ -361,12 +361,12 @@ export default function MedalsPage() {
         <div className="rounded border border-slateBlue/70 bg-[#141a24] p-4">
           <button
             type="button"
-            onClick={() => setVisibleMedalCount(12)}
+            onClick={() => setVisibleMedalCount(4)}
             className="flex w-full items-center justify-between gap-3 text-left text-xs uppercase tracking-[0.3em] text-slate-300"
           >
             <span>Hide all extra medals</span>
             <span className="rounded border border-slateBlue/60 px-2 py-1 text-[10px] tracking-[0.3em] text-slate-400">
-              Reset to 12
+              Reset to 4
             </span>
           </button>
         </div>

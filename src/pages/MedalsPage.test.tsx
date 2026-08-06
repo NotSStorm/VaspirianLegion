@@ -81,13 +81,13 @@ describe('MedalsPage', () => {
     });
 
     expect(screen.getByText('Medal 1')).toBeInTheDocument();
-    expect(screen.getByText('Medal 12')).toBeInTheDocument();
-    expect(screen.queryByText('Medal 13')).not.toBeInTheDocument();
+    expect(screen.getByText('Medal 4')).toBeInTheDocument();
+    expect(screen.queryByText('Medal 5')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /show 12 more medals/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /show 12 more medals/i }));
 
-    expect(screen.getByText('Medal 24')).toBeInTheDocument();
+    expect(screen.getByText('Medal 16')).toBeInTheDocument();
     expect(screen.queryByText('Medal 25')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /show 12 more medals/i })).toBeInTheDocument();
 
@@ -97,8 +97,8 @@ describe('MedalsPage', () => {
     expect(screen.getByRole('button', { name: /hide all extra medals/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /hide all extra medals/i }));
 
-    expect(screen.getByText('Medal 12')).toBeInTheDocument();
-    expect(screen.queryByText('Medal 13')).not.toBeInTheDocument();
+    expect(screen.getByText('Medal 4')).toBeInTheDocument();
+    expect(screen.queryByText('Medal 5')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /show 12 more medals/i })).toBeInTheDocument();
   });
 });

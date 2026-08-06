@@ -79,7 +79,7 @@ export default function BattlesPage() {
   const [unitByName, setUnitByName] = useState<Record<string, string>>({});
   const [isStaff, setIsStaff] = useState(false);
   const [hasSession, setHasSession] = useState(false);
-  const [visibleBattleCount, setVisibleBattleCount] = useState(12);
+  const [visibleBattleCount, setVisibleBattleCount] = useState(4);
   const [selectedBattleId, setSelectedBattleId] = useState<string>('');
   const [expandedBattleId, setExpandedBattleId] = useState<string>('');
   const [logText, setLogText] = useState('');
@@ -190,7 +190,7 @@ export default function BattlesPage() {
     () => battles.slice(0, visibleBattleCount),
     [battles, visibleBattleCount]
   );
-  const canResetBattleList = visibleBattleCount > 12;
+  const canResetBattleList = visibleBattleCount > 4;
 
   const inferUnit = (participantName: string) => {
     const normalized = participantName.replace(/[_\s]+/g, '').toLowerCase();
@@ -562,12 +562,12 @@ export default function BattlesPage() {
         <div className="rounded border border-slateBlue/70 bg-[#141a24] p-4">
           <button
             type="button"
-            onClick={() => setVisibleBattleCount(12)}
+            onClick={() => setVisibleBattleCount(4)}
             className="flex w-full items-center justify-between gap-3 text-left text-xs uppercase tracking-[0.3em] text-slate-300"
           >
             <span>Hide all extra battles</span>
             <span className="rounded border border-slateBlue/60 px-2 py-1 text-[10px] tracking-[0.3em] text-slate-400">
-              Reset to 12
+              Reset to 4
             </span>
           </button>
         </div>
