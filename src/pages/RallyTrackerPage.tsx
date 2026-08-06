@@ -19,6 +19,8 @@ type StatLog = {
 };
 
 type TrendPoint = {
+  pointKey: string;
+  battleId: string;
   date: string;
   melrose: number;
   pirkland: number;
@@ -40,6 +42,28 @@ function unitBucket(unit: string) {
   if (lowered.includes('melrose') || lowered.includes('87th')) return 'melrose';
   if (lowered.includes('pirkland') || lowered.includes('82nd')) return 'pirkland';
   return 'other';
+}
+
+const TRENDLINE_WINDOW_SIZE = 5;
+
+function computeMovingAverage(values: number[], windowSize: number) {
+  if (values.length === 0) return [];
+  const size = Math.max(1, Math.floor(windowSize));
+  const half = Math.floor(size / 2);
+
+  return values.map((_, index) => {
+    const start = Math.max(0, index - half);
+    const end = Math.min(values.length - 1, index + half);
+    let sum = 0;
+    let count = 0;
+
+    for (let i = start; i <= end; i += 1) {
+      sum += values[i];
+      count += 1;
+    }
+
+    return count > 0 ? sum / count : values[index];
+  });
 }
 
 export default function RallyTrackerPage() {
@@ -68,7 +92,13 @@ export default function RallyTrackerPage() {
     };
 
     const buildPoints = (selectedPeriod: TimeWindow) => {
-      const grouped = new Map<string, { melrose: Set<string>; pirkland: Set<string>; total: Set<string> }>();
+      const grouped = new Map<string, {
+        battleId: string;
+        date: string;
+        melrose: Set<string>;
+        pirkland: Set<string>;
+        total: Set<string>;
+      }>();
       ((logs || []) as StatLog[]).forEach((entry) => {
         const battleDate = parseBattleDate(entry);
         if (!battleDate) {
@@ -86,9 +116,16 @@ export default function RallyTrackerPage() {
         if (!isInTimeWindow(battleDate, selectedPeriod, now)) return;
 
         const relation = Array.isArray(entry.battles) ? entry.battles[0] : entry.battles;
-        const key = relation?.start_date || battleDate.toISOString().slice(0, 10);
+        const date = relation?.start_date || battleDate.toISOString().slice(0, 10);
+        const key = entry.battle_id;
 
-        const existing = grouped.get(key) || { melrose: new Set<string>(), pirkland: new Set<string>(), total: new Set<string>() };
+        const existing = grouped.get(key) || {
+          battleId: entry.battle_id,
+          date,
+          melrose: new Set<string>(),
+          pirkland: new Set<string>(),
+          total: new Set<string>()
+        };
         const name = entry.participant_name.trim();
         if (!name) return;
 
@@ -99,10 +136,17 @@ export default function RallyTrackerPage() {
         grouped.set(key, existing);
       });
 
-      return Array.from(grouped.entries())
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([date, value]) => ({
-          date,
+      return Array.from(grouped.values())
+        .sort((a, b) => {
+          const left = new Date(a.date).getTime();
+          const right = new Date(b.date).getTime();
+          if (left !== right) return left - right;
+          return a.battleId.localeCompare(b.battleId);
+        })
+        .map((value, index) => ({
+          pointKey: value.battleId ? value.battleId : `${value.date}-${index}`,
+          battleId: value.battleId,
+          date: value.date,
           melrose: value.melrose.size,
           pirkland: value.pirkland.size,
           total: value.total.size
@@ -217,11 +261,22 @@ export default function RallyTrackerPage() {
   }, [yMax]);
 
   const seriesPoints = (selector: (point: TrendPoint) => number) => parsedPoints.map((point) => ({
+    pointKey: point.pointKey,
+    battleId: point.battleId,
     x: xForDate(point.parsedDate),
     y: yForValue(selector(point)),
     value: selector(point),
     date: point.date
   }));
+
+  const buildTrendSeries = (series: Array<{ pointKey: string; battleId: string; x: number; y: number; value: number; date: string }>) => {
+    const averaged = computeMovingAverage(series.map((point) => point.value), TRENDLINE_WINDOW_SIZE);
+    return series.map((point, index) => ({
+      ...point,
+      y: yForValue(averaged[index]),
+      value: averaged[index]
+    }));
+  };
 
   const toSmoothPath = (linePoints: Array<{ x: number; y: number }>) => {
     if (linePoints.length === 0) return '';
@@ -248,6 +303,9 @@ export default function RallyTrackerPage() {
   const totalSeries = seriesPoints((point) => point.total);
   const pirklandSeries = seriesPoints((point) => point.pirkland);
   const melroseSeries = seriesPoints((point) => point.melrose);
+  const totalTrendSeries = buildTrendSeries(totalSeries);
+  const pirklandTrendSeries = buildTrendSeries(pirklandSeries);
+  const melroseTrendSeries = buildTrendSeries(melroseSeries);
 
   const formatTickDate = (date: Date) => `${date.getUTCMonth() + 1}/${date.getUTCDate()}/${date.getUTCFullYear()}`;
   const visibleMonthlyTicks = useMemo(() => {
@@ -260,6 +318,7 @@ export default function RallyTrackerPage() {
   }, [monthlyTicks]);
 
   const totalTableRows = parsedPoints.map((point) => ({
+    pointKey: point.pointKey,
     date: point.date,
     total: point.total
   }));
@@ -349,7 +408,7 @@ export default function RallyTrackerPage() {
                       <text x={chartArea.width / 2 - 10} y={48} fill="#111827" fontSize="12" fontWeight="700">Total</text>
                     </g>
 
-                    <path d={toSmoothPath(totalSeries)} fill="none" stroke="#496cb8" strokeWidth="5" strokeOpacity="0.85" />
+                    <path d={toSmoothPath(totalTrendSeries)} fill="none" stroke="#496cb8" strokeWidth="5" strokeOpacity="0.9" />
                     {totalSeries.map((point, index) => (
                       <g key={`total-${index}`}>
                         <circle cx={point.x} cy={point.y} r="4.8" fill="#3559a8" />
@@ -376,8 +435,8 @@ export default function RallyTrackerPage() {
                       <text x={chartArea.width / 2 + 32} y={48} fill="#111827" fontSize="12" fontWeight="700">Melrose</text>
                     </g>
 
-                    <path d={toSmoothPath(pirklandSeries)} fill="none" stroke="#5d84d8" strokeWidth="5" strokeOpacity="0.8" />
-                    <path d={toSmoothPath(melroseSeries)} fill="none" stroke="#8f4de8" strokeWidth="5" strokeOpacity="0.8" />
+                    <path d={toSmoothPath(pirklandTrendSeries)} fill="none" stroke="#5d84d8" strokeWidth="5" strokeOpacity="0.85" />
+                    <path d={toSmoothPath(melroseTrendSeries)} fill="none" stroke="#8f4de8" strokeWidth="5" strokeOpacity="0.85" />
 
                     {pirklandSeries.map((point, index) => (
                       <g key={`pirkland-${index}`}>
@@ -431,7 +490,7 @@ export default function RallyTrackerPage() {
                   </thead>
                   <tbody>
                     {totalTableRows.map((row) => (
-                      <tr key={row.date} className="border-t border-slateBlue/30">
+                      <tr key={row.pointKey} className="border-t border-slateBlue/30">
                         <td className="px-4 py-3 text-slate-300">{row.date}</td>
                         <td className="px-4 py-3 text-right font-mono text-silver">{row.total}</td>
                       </tr>
