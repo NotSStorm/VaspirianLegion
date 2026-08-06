@@ -8,6 +8,11 @@ routes = [
 [vars]
 ROBLOX_CLIENT_ID = "8125208813163703919"
 ROBLOX_OAUTH_REDIRECT_URI = "https://regionofvaspiria.com/link-roblox"
+DISCORD_CLIENT_ID = "1526825796822630504"
+SUPABASE_URL = "https://kpssbqggfcmctmybtksj.supabase.co"
+VITE_SUPABASE_URL = "https://kpssbqggfcmctmybtksj.supabase.co"
+VITE_SUPABASE_ANON_KEY = "sb_publishable_WgFgMX33riKhXqmZNiQT4w_GBnymyuf"
+workers_dev = true
 
 [[kv_namespaces]]
 binding = "SYNC_PROGRESS"
