@@ -33,4 +33,30 @@ describe('PersonnelTable', () => {
       expect(screen.queryByText('MEDAL SIX')).not.toBeInTheDocument();
     });
   });
+
+  it('formats veneration medals and keeps medal popup internally scrollable', () => {
+    render(
+      <PersonnelTable
+        rows={[
+          {
+            combinedName: 'Veneration Holder',
+            unit: 'Alpha',
+            groupRank: 'Captain',
+            medals: ['ORDER OF THE GOLD GRIFFIN', 'VEN 60', 'VEN 18', 'VEN 36', 'VEN 24', 'VEN 48']
+          }
+        ]}
+      />
+    );
+
+    const overflowButton = screen.getByRole('button', { name: /\+1/ });
+    fireEvent.mouseEnter(overflowButton);
+
+    expect(screen.getAllByText('Veneration - 5 Years').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Veneration - 18 Months').length).toBeGreaterThan(0);
+    expect(screen.queryByText('VEN 60')).not.toBeInTheDocument();
+
+    const medalMenuList = screen.getByTestId('medal-menu-list');
+    expect(medalMenuList.className).toContain('max-h-[70vh]');
+    expect(medalMenuList.className).toContain('overflow-y-auto');
+  });
 });

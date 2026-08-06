@@ -1,5 +1,5 @@
 import AssignmentSelect from './AssignmentSelect';
-import { getMedalEmojiPath } from '../../lib/medals';
+import { formatMedalDisplayName, getMedalEmojiPath } from '../../lib/medals';
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 
@@ -119,22 +119,23 @@ export default function PersonnelTable({ rows, editableUnits = false, unitOption
                     <div className="relative flex items-center">
                       {row.medals.slice(0, 5).map((medal, medalIndex) => {
                         const emojiPath = getMedalEmojiPath(medal);
+                        const displayMedal = formatMedalDisplayName(medal);
 
                         return (
                           <div
                             key={`${rowKey}:${medal}:${medalIndex}`}
                             className={`group/medal relative inline-flex h-8 w-8 items-center justify-center ${medalIndex === 0 ? '' : '-ml-1'}`}
-                            title={medal}
+                            title={displayMedal}
                           >
                             {emojiPath ? (
-                              <img src={emojiPath} alt={medal} className="h-7 w-7 object-contain" />
+                              <img src={emojiPath} alt={displayMedal} className="h-7 w-7 object-contain" />
                             ) : (
                               <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-300">
                                 {medal.slice(0, 2)}
                               </span>
                             )}
                             <span className="pointer-events-none absolute -top-9 left-1/2 z-20 hidden -translate-x-1/2 whitespace-nowrap rounded border border-slateBlue/70 bg-[#0d121b] px-2 py-1 text-[10px] uppercase tracking-[0.2em] text-slate-200 group-hover/medal:block">
-                              {medal}
+                              {displayMedal}
                             </span>
                           </div>
                         );
@@ -160,27 +161,28 @@ export default function PersonnelTable({ rows, editableUnits = false, unitOption
       </table>
       {openMedalMenuKey && medalMenuStyle && createPortal(
         <div
-          className="fixed z-50 w-80 rounded border border-slateBlue/70 bg-[#0d121b] p-3 shadow-xl"
+          className="fixed z-50 w-80 max-h-[80vh] overflow-hidden rounded border border-slateBlue/70 bg-[#0d121b] p-3 shadow-xl"
           style={{ top: `${medalMenuStyle.top}px`, left: `${medalMenuStyle.left}px` }}
           onMouseEnter={keepMedalMenuOpen}
           onMouseLeave={() => scheduleCloseMedalMenu(openMedalMenuKey)}
         >
           <div className="mb-2 text-[10px] uppercase tracking-[0.25em] text-slate-400">All Medals</div>
-          <div className="flex flex-wrap gap-2">
+          <div data-testid="medal-menu-list" className="max-h-[70vh] overflow-y-auto pr-1">
             {rows
               .find((row) => (row.key || row.combinedName) === openMedalMenuKey)
               ?.medals.map((medal, medalIndex) => {
                 const emojiPath = getMedalEmojiPath(medal);
+                const displayMedal = formatMedalDisplayName(medal);
                 return (
                   <div key={`dropdown:${openMedalMenuKey}:${medal}:${medalIndex}`} className="flex items-center gap-2 rounded px-2 py-1 hover:bg-slateBlue/20">
                     {emojiPath ? (
-                      <img src={emojiPath} alt={medal} className="h-6 w-6 object-contain" />
+                      <img src={emojiPath} alt={displayMedal} className="h-6 w-6 object-contain" />
                     ) : (
                       <span className="inline-flex h-6 w-6 items-center justify-center text-[9px] font-semibold uppercase text-slate-300">
                         {medal.slice(0, 2)}
                       </span>
                     )}
-                    <span className="text-xs text-slate-200">{medal}</span>
+                    <span className="text-xs text-slate-200">{displayMedal}</span>
                   </div>
                 );
               })}

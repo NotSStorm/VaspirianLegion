@@ -4,6 +4,13 @@ export type MedalOption = {
   emojiFile?: string;
 };
 
+const SERVICE_VENERATION_YEAR_LABELS: Record<number, string> = {
+  24: 'Veneration - 2 Years',
+  36: 'Veneration - 3 Years',
+  48: 'Veneration - 4 Years',
+  60: 'Veneration - 5 Years'
+};
+
 function formatServiceVenerationName(months: number) {
   if (months % 12 === 0) {
     const years = months / 12;
@@ -110,6 +117,25 @@ function normalizeMedalName(value: string) {
     .replace(/&/g, 'and')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+}
+
+export function formatVenerationName(months: number): string {
+  const mapped = SERVICE_VENERATION_YEAR_LABELS[months];
+  if (mapped) {
+    return mapped;
+  }
+
+  return `Veneration - ${months} Months`;
+}
+
+export function formatMedalDisplayName(medalName: string): string {
+  const trimmed = String(medalName || '').trim();
+  const venMatch = /^ven\s*(\d+)$/i.exec(trimmed);
+  if (!venMatch) {
+    return trimmed;
+  }
+
+  return formatVenerationName(Number(venMatch[1]));
 }
 
 const emojiByNormalizedMedalName = new Map<string, string>();
