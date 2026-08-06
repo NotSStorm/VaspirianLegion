@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Shield } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { getAuthenticatedState } from '../lib/auth';
 import { MEDAL_OPTIONS } from '../lib/medals';
 import { supabase } from '../lib/supabase';
@@ -107,6 +108,7 @@ async function loadAvatarUrl(robloxId?: string | null, robloxUsername?: string |
 }
 
 export default function ProfilePage() {
+  const navigate = useNavigate();
   const [profile, setProfile] = useState<HeaderProfile | null>(null);
   const [companyDraft, setCompanyDraft] = useState('');
   const [savingCompany, setSavingCompany] = useState(false);
@@ -124,6 +126,7 @@ export default function ProfilePage() {
   const [medalRequestNote, setMedalRequestNote] = useState('');
   const [submittingMedalRequest, setSubmittingMedalRequest] = useState(false);
   const [medalRequestMessage, setMedalRequestMessage] = useState<string | null>(null);
+  const [logoutPending, setLogoutPending] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -438,6 +441,20 @@ export default function ProfilePage() {
     }
   };
 
+  const handleLogout = async () => {
+    if (logoutPending) {
+      return;
+    }
+
+    try {
+      setLogoutPending(true);
+      await supabase.auth.signOut();
+      navigate('/login', { replace: true });
+    } finally {
+      setLogoutPending(false);
+    }
+  };
+
   return (
     <section className="space-y-6">
       <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
@@ -577,6 +594,20 @@ export default function ProfilePage() {
               </button>
               {medalRequestMessage && <p className="text-sm text-slate-300">{medalRequestMessage}</p>}
             </div>
+          </div>
+
+          <div className="rounded border border-slateBlue/70 bg-[#141a24] p-6">
+            <div className="text-[10px] uppercase tracking-[0.35em] text-slate-400">Account</div>
+            <h3 className="mt-2 text-lg font-semibold uppercase tracking-[0.2em] text-silver">Session Controls</h3>
+            <p className="mt-2 text-sm text-slate-300">Sign out from this device when you are done.</p>
+            <button
+              type="button"
+              onClick={() => void handleLogout()}
+              disabled={logoutPending}
+              className="mt-4 w-full rounded border border-slateBlue/70 px-3 py-2 text-xs font-semibold uppercase tracking-[0.25em] text-slate-200 transition hover:border-silver/40 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {logoutPending ? 'Signing out...' : 'Logout'}
+            </button>
           </div>
         </>
       )}

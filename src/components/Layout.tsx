@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Menu } from 'lucide-react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { getAuthenticatedState } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 import LegionCrest from './shared/LegionCrest';
@@ -26,10 +26,12 @@ type HeaderUser = {
 };
 
 export default function Layout({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [headerUser, setHeaderUser] = useState<HeaderUser | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [avatarLoading, setAvatarLoading] = useState(false);
+  const [logoutPending, setLogoutPending] = useState(false);
 
   const roleLabel = useMemo(() => {
     if (!headerUser) return null;
@@ -120,6 +122,23 @@ export default function Layout({ children }: { children: ReactNode }) {
     };
   }, [headerUser]);
 
+  const handleLogout = async () => {
+    if (logoutPending) {
+      return;
+    }
+
+    try {
+      setLogoutPending(true);
+      await supabase.auth.signOut();
+      setHeaderUser(null);
+      setAvatarUrl(null);
+      setMobileOpen(false);
+      navigate('/login', { replace: true });
+    } finally {
+      setLogoutPending(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-navy text-silver">
       <header className="border-b border-slateBlue/60 bg-[#0d121b]/90 backdrop-blur">
@@ -148,25 +167,35 @@ export default function Layout({ children }: { children: ReactNode }) {
               ))}
             </nav>
             {headerUser && (
-              <NavLink to="/profile" className="flex items-center gap-3 rounded border border-slateBlue/60 bg-[#141a24] px-3 py-2 transition hover:border-silver/40 hover:bg-[#18202c]">
-                <div className="h-10 w-10 overflow-hidden rounded-full border border-slateBlue/60 bg-[#0d121b]">
-                  {avatarLoading ? (
-                    <div className="h-full w-full animate-pulse bg-slateBlue/30" />
-                  ) : avatarUrl ? (
-                    <img
-                      src={avatarUrl}
-                      alt="Roblox avatar"
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">N/A</div>
-                  )}
-                </div>
-                <div className="leading-tight">
-                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-silver">{roleLabel}</div>
-                  <div className="max-w-[160px] truncate text-xs text-slate-300">{headerUser.robloxUsername || (headerUser.robloxId ? 'Roblox Linked' : 'Roblox Pending')}</div>
-                </div>
-              </NavLink>
+              <div className="flex items-center gap-2">
+                <NavLink to="/profile" className="flex items-center gap-3 rounded border border-slateBlue/60 bg-[#141a24] px-3 py-2 transition hover:border-silver/40 hover:bg-[#18202c]">
+                  <div className="h-10 w-10 overflow-hidden rounded-full border border-slateBlue/60 bg-[#0d121b]">
+                    {avatarLoading ? (
+                      <div className="h-full w-full animate-pulse bg-slateBlue/30" />
+                    ) : avatarUrl ? (
+                      <img
+                        src={avatarUrl}
+                        alt="Roblox avatar"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">N/A</div>
+                    )}
+                  </div>
+                  <div className="leading-tight">
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-silver">{roleLabel}</div>
+                    <div className="max-w-[160px] truncate text-xs text-slate-300">{headerUser.robloxUsername || (headerUser.robloxId ? 'Roblox Linked' : 'Roblox Pending')}</div>
+                  </div>
+                </NavLink>
+                <button
+                  type="button"
+                  onClick={() => void handleLogout()}
+                  disabled={logoutPending}
+                  className="rounded border border-slateBlue/60 bg-[#141a24] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-200 transition hover:border-silver/40 hover:bg-[#18202c] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {logoutPending ? 'Signing out...' : 'Logout'}
+                </button>
+              </div>
             )}
           </div>
           <nav className="hidden items-center gap-5 md:flex lg:hidden">
@@ -185,6 +214,25 @@ export default function Layout({ children }: { children: ReactNode }) {
                   {item.label}
                 </NavLink>
               ))}
+              {headerUser && (
+                <NavLink
+                  className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-300"
+                  to="/profile"
+                  onClick={() => setMobileOpen(false)}
+                >
+                  PROFILE
+                </NavLink>
+              )}
+              {headerUser && (
+                <button
+                  type="button"
+                  onClick={() => void handleLogout()}
+                  disabled={logoutPending}
+                  className="w-fit rounded border border-slateBlue/60 bg-[#141a24] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-200 transition hover:border-silver/40 hover:bg-[#18202c] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {logoutPending ? 'Signing out...' : 'Logout'}
+                </button>
+              )}
             </div>
           </div>
         )}
